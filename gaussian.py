@@ -60,6 +60,8 @@ def compute_jacobian(x: torch.Tensor, mu, sigma_inv, c, v) -> torch.Tensor:
     
     x -> (Q, D), requires_grad=True
     output: Jacobian (Q, D, D)  of u with respect to x
+    
+    output: scalar loss tensor
     """
     x = x.requires_grad_(True)
     G = gaussian(x, mu, sigma_inv, c)
@@ -84,8 +86,8 @@ def gradient_loss(jacob_pred: torch.Tensor, jacob_target: torch.Tensor) -> torch
     
     output: scalar loss tensor
     """
-
     return F.l1_loss(jacob_pred, jacob_target, reduction='mean')
+
 
 def anisotropic_loss(s:torch.Tensor, r_aniso:float=1.5)->torch.Tensor:
     """
@@ -93,6 +95,8 @@ def anisotropic_loss(s:torch.Tensor, r_aniso:float=1.5)->torch.Tensor:
         
         s -> (N,D) scales for N particles
         r_aniso -> maximum ratio between max and min (default is 1.5)
+        
+        output: scalar loss tensor
     """
     s_max = torch.max(s, dim=1).values  # (N,)
     s_min = torch.min(s, dim=1).values  # (N,)
@@ -100,5 +104,26 @@ def anisotropic_loss(s:torch.Tensor, r_aniso:float=1.5)->torch.Tensor:
     ratio = (s_max / (s_min + 1e-8)) - r_aniso  # Added epsilon to prevent division by zero
     return torch.relu(ratio).mean()
 
-def volume_loss():
+def volume_loss(s: torch.Tensor) -> torch.Tensor:
+    """
+        eq11 volumetric loss (punshes particles without uniform volume)
+        
+        s-> (N,D) scales for N particles
+        
+        output: scalar loss tensor
+    """
+    
+    volumes = torch.prod(s.clamp(min=1e-8), dim=1) # clamp so that we dont divide by 0 
+    avg_vol = torch.mean(volumes)
+    deviation = (volumes/(avg_vol + 1e-8)) - 1.0
+    
+    return torch.mean(deviation ** 2)
+    
+def total_loss():
+    # L_val = value_loss
+    # L_grad = gradient_loss
+    # L_aniso = anisotropic_loss
+    # L_vol = volume_loss
+    
+    # return L_val + L_grad + L_aniso + L_vol
     pass
