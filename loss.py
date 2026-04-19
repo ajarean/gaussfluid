@@ -1,45 +1,6 @@
 import torch
 import torch.nn.functional as F
-
-# https://arxiv.org/pdf/2405.18133
-# ^ my beloved
-
-def gaussian(x: torch.Tensor, mu: torch.Tensor, sigma_inv: torch.Tensor, c: float) -> torch.Tensor:
-    """
-        this is eq5 in the paper
-        
-        x -> (N,D) # where D is the dimensionality, N is number of points
-        mu -> (K,D) # K Gaussian centers
-        sigma_inv -> (K,D,D) # K inverse covariances -- make sure that this is positive definite
-        c -> the clamping threshold
-        
-        output: each point's response to each gaussian 
-        
-    """
-    
-    diff = x.unsqueeze(1) - mu.unsqueeze(0) # becomes (N, K, D)
-    # diffT = torch.transpose(diff)
-    # exponent = diffT @ sigma_inv @ diff
-    
-    # basically this einsum is the same as diff[n, k, i] * sigma_inv[k, i, j] * diff[n, k, j] -> (N,K)
-    exponent = torch.einsum('nki,kij,nkj->nk', diff, sigma_inv, diff)
-    G = torch.exp(-0.5 * exponent)
-    
-    
-    # the clamping part -- this is the same as max(G-c, 0)
-    return torch.relu(G-c) # softplus can also work (?)
-
-def velocity_field(G: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-    """
-        G -> (N,K) # each point's response to each gaussian (eq5)
-        v -> (K,D) # the weights of each gaussian
-        
-        output: velocity field (eq6)
-    """
-    
-    u = torch.einsum('nk,kd->nd', G, v)
-    return u
-
+from fields import gaussian, velocity_field
 
 def value_loss(v_pred: torch.Tensor, v_target: torch.Tensor) -> torch.Tensor:
     """
@@ -155,11 +116,12 @@ def total_loss(x: torch.Tensor, mu, sigma_inv, c, v,
     
     
     _, s_inv, _ = torch.linalg.svd(sigma_inv)  # s_inv -> (K, D)
-    s = 1.0 / s_inv.clamp(min=1e-8)
+    # s = 1.0 / s_inv.clamp(min=1e-8)
+    s = 1.0 / torch.sqrt(s_inv.clamp(min=1e-8))
     # does an svd on sigma_inv then reciprocates
     # s is the singular values of sigma (not sigma_inv)
     L_aniso = anisotropic_loss(s)
     
     L_vol = volume_loss(s)
     
-    return L_val + L_grad + L_aniso + L_vol
+    return lam_val*L_val + lam_grad*L_grad + lam_aniso*L_aniso + lam_vol*L_vol
