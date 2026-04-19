@@ -52,6 +52,27 @@ def value_loss(v_pred: torch.Tensor, v_target: torch.Tensor) -> torch.Tensor:
     # https://docs.pytorch.org/docs/stable/generated/torch.nn.L1Loss.html
     return F.l1_loss(v_pred, v_target, reduction='mean')
 
+def compute_jacobian(x: torch.Tensor, mu, sigma_inv, c, v) -> torch.Tensor:
+    """
+    use this to feed into the gradient loss
+    
+    x -> (Q, D), requires_grad=True
+    output: Jacobian (Q, D, D)  of u with respect to x
+    """
+    x = x.requires_grad_(True)
+    G = gaussian(x, mu, sigma_inv, c)
+    u = velocity_field(G, v)  
+    # ^ the forward pass
+    
+    jacob_rows = []
+    for d in range(u.shape[1]):
+        grad = torch.autograd.grad(u[:, d].sum(), x, create_graph=True)[0]  # (Q, D)
+        # ^ compute partial derivatives 
+        # create a backpropagable graph
+        jacob_rows.append(grad)
+    
+    return torch.stack(jacob_rows, dim=1)  # (Q, D, D)
+
 def gradient_loss(jacob_pred: torch.Tensor, jacob_target: torch.Tensor) -> torch.Tensor:
     """
     eq9 gradient loss
