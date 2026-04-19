@@ -1,6 +1,8 @@
 import torch
 import torch.nn.functional as F
 
+# https://arxiv.org/pdf/2405.18133
+# ^ my beloved
 
 def gaussian(x: torch.Tensor, mu: torch.Tensor, sigma_inv: torch.Tensor, c: float) -> torch.Tensor:
     """
@@ -84,3 +86,19 @@ def gradient_loss(jacob_pred: torch.Tensor, jacob_target: torch.Tensor) -> torch
     """
 
     return F.l1_loss(jacob_pred, jacob_target, reduction='mean')
+
+def anisotropic_loss(s:torch.Tensor, r_aniso:float=1.5)->torch.Tensor:
+    """
+        eq10 anisotropic loss (punishes gaussians that are too stretched)
+        
+        s -> (N,D) scales for N particles
+        r_aniso -> maximum ratio between max and min (default is 1.5)
+    """
+    s_max = torch.max(s, dim=1).values  # (N,)
+    s_min = torch.min(s, dim=1).values  # (N,)
+    
+    ratio = (s_max / (s_min + 1e-8)) - r_aniso  # Added epsilon to prevent division by zero
+    return torch.relu(ratio).mean()
+
+def volume_loss():
+    pass
