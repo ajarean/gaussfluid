@@ -54,7 +54,7 @@ def value_loss(v_pred: torch.Tensor, v_target: torch.Tensor) -> torch.Tensor:
     # https://docs.pytorch.org/docs/stable/generated/torch.nn.L1Loss.html
     return F.l1_loss(v_pred, v_target, reduction='mean')
 
-def compute_jacobian(x: torch.Tensor, mu, sigma_inv, c, v) -> torch.Tensor:
+def compute_jacobian(x: torch.Tensor, G, v) -> torch.Tensor:
     """
     use this to feed into the gradient loss
     
@@ -64,7 +64,7 @@ def compute_jacobian(x: torch.Tensor, mu, sigma_inv, c, v) -> torch.Tensor:
     output: scalar loss tensor
     """
     x = x.requires_grad_(True)
-    G = gaussian(x, mu, sigma_inv, c)
+    # G = gaussian(x, mu, sigma_inv, c)
     u = velocity_field(G, v)  
     # ^ the forward pass
     
@@ -118,12 +118,48 @@ def volume_loss(s: torch.Tensor) -> torch.Tensor:
     deviation = (volumes/(avg_vol + 1e-8)) - 1.0
     
     return torch.mean(deviation ** 2)
+
+
+def taylor_vortex(x: torch.Tensor) -> torch.Tensor:
+    """x -> (Q, 2), returns (Q, 2) velocities"""
+    px, py = x[:, 0], x[:, 1]
+    u = -torch.sin(torch.pi * py) * torch.cos(torch.pi * px)
+    v =  torch.cos(torch.pi * py) * torch.sin(torch.pi * px)
+    return torch.stack([u, v], dim=1)
+
+
+def total_loss(x: torch.Tensor, mu, sigma_inv, c, v, 
+               lam_val=1.0, lam_grad=1.0, lam_aniso=1.0, lam_vol=1.0):
+    """
+    combines all of the above loss functions
     
-def total_loss():
-    # L_val = value_loss
-    # L_grad = gradient_loss
-    # L_aniso = anisotropic_loss
-    # L_vol = volume_loss
+    all the lam variables are the weights
+    """
+    x = x.requires_grad_(True)
     
-    # return L_val + L_grad + L_aniso + L_vol
-    pass
+    G = gaussian(x, mu, sigma_inv, c)
+    v_pred = velocity_field(G, v)
+    v_target = taylor_vortex(x)
+    L_val = value_loss(v_pred, v_target)
+    
+    
+    jacob_pred = compute_jacobian(x, G, v)
+    jacob_target_rows = []
+    for d in range(v_target.shape[1]):
+        grad_t = torch.autograd.grad(v_target[:, d].sum(), x, create_graph=True)[0]
+        jacob_target_rows.append(grad_t)
+    jacob_target = torch.stack(jacob_target_rows, dim=1)
+    # same code as compute_jacobian
+    L_grad = gradient_loss(jacob_pred, jacob_target)
+    
+    
+    
+    _, s_inv, _ = torch.linalg.svd(sigma_inv)  # s_inv -> (K, D)
+    s = 1.0 / s_inv.clamp(min=1e-8)
+    # does an svd on sigma_inv then reciprocates
+    # s is the singular values of sigma (not sigma_inv)
+    L_aniso = anisotropic_loss(s)
+    
+    L_vol = volume_loss(s)
+    
+    return L_val + L_grad + L_aniso + L_vol
