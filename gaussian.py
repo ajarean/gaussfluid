@@ -1,4 +1,6 @@
 import torch
+import torch.nn.functional as F
+
 
 def gaussian(x: torch.Tensor, mu: torch.Tensor, sigma_inv: torch.Tensor, c: float) -> torch.Tensor:
     """
@@ -37,3 +39,27 @@ def velocity_field(G: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
     return u
 
 
+def value_loss(v_pred: torch.Tensor, v_target: torch.Tensor) -> torch.Tensor:
+    """
+    eq8 monte carlo value loss
+    
+    v_pred -> (Q, D) # predicted velocities at Q randomly sampled points
+    v_target -> (Q, D) # ground truth velocities at the same Q points
+    
+    output: scalar loss
+    """
+    # L1 loss with reduction='mean' computes the sum of absolute differences and divides by total elements (Q*d)
+    # https://docs.pytorch.org/docs/stable/generated/torch.nn.L1Loss.html
+    return F.l1_loss(v_pred, v_target, reduction='mean')
+
+def gradient_loss(jacob_pred: torch.Tensor, jacob_target: torch.Tensor) -> torch.Tensor:
+    """
+    eq9 gradient loss
+    
+    jacob_pred -> (Q, D, D) # Jacobian of predicted velocity 
+    jacob_target -> (Q, D, D) # Jacobian of target velocity 
+    
+    output: scalar loss tensor
+    """
+
+    return F.l1_loss(jacob_pred, jacob_target, reduction='mean')
