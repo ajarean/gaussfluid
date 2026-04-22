@@ -39,3 +39,10 @@ def velocity_field(G: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
     
     u = torch.einsum('nk,kd->nd', G, v)
     return u
+
+def taylor_vortex(x: torch.Tensor) -> torch.Tensor:
+    """x -> (Q, 2), returns (Q, 2) velocities"""
+    px, py = x[:, 0], x[:, 1]
+    u = -torch.sin(torch.pi * py) * torch.cos(torch.pi * px)
+    v =  torch.cos(torch.pi * py) * torch.sin(torch.pi * px)
+    return torch.stack([u, v], dim=1)

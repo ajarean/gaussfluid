@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from fields import gaussian, velocity_field
+from fields import gaussian, velocity_field, taylor_vortex
 
 def value_loss(v_pred: torch.Tensor, v_target: torch.Tensor) -> torch.Tensor:
     """
@@ -79,14 +79,6 @@ def volume_loss(s: torch.Tensor) -> torch.Tensor:
     deviation = (volumes/(avg_vol + 1e-8)) - 1.0
     
     return torch.mean(deviation ** 2)
-
-
-def taylor_vortex(x: torch.Tensor) -> torch.Tensor:
-    """x -> (Q, 2), returns (Q, 2) velocities"""
-    px, py = x[:, 0], x[:, 1]
-    u = -torch.sin(torch.pi * py) * torch.cos(torch.pi * px)
-    v =  torch.cos(torch.pi * py) * torch.sin(torch.pi * px)
-    return torch.stack([u, v], dim=1)
 
 
 def total_loss(x: torch.Tensor, mu, sigma_inv, c, v, 
