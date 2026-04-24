@@ -18,8 +18,8 @@ def gaussian(x: torch.Tensor, mu: torch.Tensor, sigma_inv: torch.Tensor, c: floa
     """
     
     diff = x.unsqueeze(1) - mu.unsqueeze(0) # becomes (N, K, D)
-    # diffT = torch.transpose(diff)
-    # exponent = diffT @ sigma_inv @ diff
+    # x: (N,D) -> (N, 1, D)
+    # mu: (K,D) -> (1, K, D)
     
     # basically this einsum is the same as diff[n, k, i] * sigma_inv[k, i, j] * diff[n, k, j] -> (N,K)
     exponent = torch.einsum('nki,kij,nkj->nk', diff, sigma_inv, diff)
@@ -27,7 +27,7 @@ def gaussian(x: torch.Tensor, mu: torch.Tensor, sigma_inv: torch.Tensor, c: floa
     
     
     # the clamping part -- this is the same as max(G-c, 0)
-    return torch.relu(G-c) # softplus can also work (?)
+    return torch.relu(G-c) 
 
 def velocity_field(G: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
     """

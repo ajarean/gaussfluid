@@ -4,12 +4,12 @@ from fields import gaussian, velocity_field, taylor_vortex
 
 def value_loss(v_pred: torch.Tensor, v_target: torch.Tensor) -> torch.Tensor:
     """
-    eq8 monte carlo value loss
-    
-    v_pred -> (Q, D) # predicted velocities at Q randomly sampled points
-    v_target -> (Q, D) # ground truth velocities at the same Q points
-    
-    output: scalar loss
+        eq8 monte carlo value loss
+        
+        v_pred -> (Q, D) # predicted velocities at Q randomly sampled points
+        v_target -> (Q, D) # ground truth velocities at the same Q points
+        
+        output: scalar loss
     """
     # L1 loss with reduction='mean' computes the sum of absolute differences and divides by total elements (Q*d)
     # https://docs.pytorch.org/docs/stable/generated/torch.nn.L1Loss.html
@@ -17,12 +17,12 @@ def value_loss(v_pred: torch.Tensor, v_target: torch.Tensor) -> torch.Tensor:
 
 def compute_jacobian(x: torch.Tensor, G, v) -> torch.Tensor:
     """
-    use this to feed into the gradient loss
-    
-    x -> (Q, D), requires_grad=True
-    output: Jacobian (Q, D, D)  of u with respect to x
-    
-    output: scalar loss tensor
+        use this to feed into the gradient loss
+        
+        x -> (Q, D), requires_grad=True
+        output: Jacobian (Q, D, D)  of u with respect to x
+        
+        output: scalar loss tensor
     """
     x = x.requires_grad_(True)
     # G = gaussian(x, mu, sigma_inv, c)
@@ -40,12 +40,12 @@ def compute_jacobian(x: torch.Tensor, G, v) -> torch.Tensor:
 
 def gradient_loss(jacob_pred: torch.Tensor, jacob_target: torch.Tensor) -> torch.Tensor:
     """
-    eq9 gradient loss
-    
-    jacob_pred -> (Q, D, D) # Jacobian of predicted velocity 
-    jacob_target -> (Q, D, D) # Jacobian of target velocity 
-    
-    output: scalar loss tensor
+        eq9 gradient loss
+        
+        jacob_pred -> (Q, D, D) # Jacobian of predicted velocity 
+        jacob_target -> (Q, D, D) # Jacobian of target velocity 
+        
+        output: scalar loss tensor
     """
     return F.l1_loss(jacob_pred, jacob_target, reduction='mean')
 
@@ -84,9 +84,9 @@ def volume_loss(s: torch.Tensor) -> torch.Tensor:
 def total_loss(x: torch.Tensor, mu, sigma_inv, c, v, 
                lam_val=1.0, lam_grad=1.0, lam_aniso=1.0, lam_vol=1.0):
     """
-    combines all of the above loss functions
-    
-    all the lam variables are the weights
+        combines all of the above loss functions
+        
+        all the lam variables are the weights
     """
     x = x.requires_grad_(True)
     
@@ -121,6 +121,9 @@ def total_loss(x: torch.Tensor, mu, sigma_inv, c, v,
 # 5.2 of the paper
 
 def curl_2d(u: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+    """
+        calculates curl in 2d
+    """
     x = x.requires_grad_(True)
     du_x = torch.autograd.grad(u[:, 0].sum(), x, create_graph=True)[0]  # (Q,2): [du_x/dx, du_x/dy]
     du_y = torch.autograd.grad(u[:, 1].sum(), x, create_graph=True)[0]  # (Q,2): [du_y/dx, du_y/dy]
@@ -130,7 +133,9 @@ def curl_2d(u: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
 
 
 def advect_vorticity(omega_prev: torch.Tensor, x_prev: torch.Tensor, x_curr: torch.Tensor, u_prev_fn, dt: float) -> torch.Tensor:
-    """eq15"""
+    """
+        eq15
+    """
     with torch.no_grad():
         u_at_curr = u_prev_fn(x_curr)
     x_back = x_curr - dt * u_at_curr
@@ -141,14 +146,18 @@ def advect_vorticity(omega_prev: torch.Tensor, x_prev: torch.Tensor, x_curr: tor
 
 
 def vorticity_loss(u_pred: torch.Tensor, x: torch.Tensor, omega_target: torch.Tensor) -> torch.Tensor:
-    """eq13"""
+    """
+        eq13
+    """
     omega_pred = curl_2d(u_pred,x)
     loss = F.l1_loss(omega_pred, omega_target, reduction='mean')
     return loss
 
 
 def divergence_loss(u_pred: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-    """eq14"""
+    """
+        eq14
+    """
     x = x.requires_grad_(True)
     du_x = torch.autograd.grad(u_pred[:, 0].sum(), x, create_graph=True)[0]  # (Q,2)
     du_y = torch.autograd.grad(u_pred[:, 1].sum(), x, create_graph=True)[0]  # (Q,2)
@@ -160,7 +169,7 @@ def divergence_loss(u_pred: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
 
 def position_loss(mu: torch.Tensor, mu_init: torch.Tensor) -> torch.Tensor:
     """
-    eq21
+        eq21
     """
     return F.mse_loss(mu, mu_init, reduction='mean')
     
