@@ -117,3 +117,42 @@ def total_loss(x: torch.Tensor, mu, sigma_inv, c, v,
     L_vol = volume_loss(s)
     
     return lam_val*L_val + lam_grad*L_grad + lam_aniso*L_aniso + lam_vol*L_vol
+
+# 5.2 of the paper
+
+def curl_2d(u: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+    x = x.requires_grad_(True)
+    du_x = torch.autograd.grad(u[:, 0].sum(), x, create_graph=True)[0]  # (Q,2): [du_x/dx, du_x/dy]
+    du_y = torch.autograd.grad(u[:, 1].sum(), x, create_graph=True)[0]  # (Q,2): [du_y/dx, du_y/dy]
+    
+    curl = du_y[:, 0] - du_x[:, 1]  # du_y/dx - du_x/dy, shape (Q,)
+    return curl.unsqueeze(1)
+
+
+def advect_vorticity(omega_prev: torch.Tensor, x_prev: torch.Tensor, x_curr: torch.Tensor, u_prev_fn, dt: float) -> torch.Tensor:
+    """eq15"""
+    with torch.no_grad():
+        u_at_curr = u_prev_fn(x_curr)
+    x_back = x_curr - dt * u_at_curr
+    
+    dists = torch.cdist(x_back, x_prev)
+    idx = dists.argmin(dim=1)
+    return omega_prev[idx]
+
+
+def vorticity_loss(u_pred: torch.Tensor, x: torch.Tensor, omega_target: torch.Tensor) -> torch.Tensor:
+    """eq13"""
+    omega_pred = curl_2d(u_pred,x)
+    loss = F.l1_loss(omega_pred, omega_target, reduction='mean')
+    return loss
+
+
+def divergence_loss(u_pred: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+    """eq14"""
+    x = x.requires_grad_(True)
+    du_x = torch.autograd.grad(u_pred[:, 0].sum(), x, create_graph=True)[0]  # (Q,2)
+    du_y = torch.autograd.grad(u_pred[:, 1].sum(), x, create_graph=True)[0]  # (Q,2)
+    
+    div = du_x[:, 0] + du_y[:, 1]
+    loss = (div ** 2).mean()
+    return loss

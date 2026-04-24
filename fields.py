@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 
 # https://arxiv.org/pdf/2405.18133
-# ^ my beloved
+# ^ the paper
 
 def gaussian(x: torch.Tensor, mu: torch.Tensor, sigma_inv: torch.Tensor, c: float) -> torch.Tensor:
     """
