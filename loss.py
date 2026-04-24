@@ -156,3 +156,11 @@ def divergence_loss(u_pred: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     div = du_x[:, 0] + du_y[:, 1]
     loss = (div ** 2).mean()
     return loss
+
+
+def position_loss(mu: torch.Tensor, mu_init: torch.Tensor) -> torch.Tensor:
+    """
+    eq21
+    """
+    return F.mse_loss(mu, mu_init, reduction='mean')
+    
