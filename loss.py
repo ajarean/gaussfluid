@@ -111,7 +111,7 @@ def total_loss(x: torch.Tensor, mu, sigma_inv, c, v,
     _, s_inv, _ = torch.linalg.svd(sigma_inv)  # s_inv -> (K, D)
     # s = 1.0 / s_inv.clamp(min=1e-8)
     s = 1.0 / torch.sqrt(s_inv.clamp(min=1e-8)) # this would be 10^4 if we clamp 
-    # get rid of this and replace it with an assert 
+    # TODO: get rid of this and replace it with an assert 
     
     # does an svd on sigma_inv then reciprocates
     # s is the singular values of sigma (not sigma_inv)
@@ -137,9 +137,11 @@ def curl_2d(u: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
 
 
 def advect_vorticity(x_curr: torch.Tensor, u_prev_fn, dt: float) -> torch.Tensor:
+    # TODO pass in u_prev from prev timestep
+    
     """
         eq15
-        w(x) is the curl of the previous velocity field 
+        omega(x) is the curl of the previous velocity field 
         x_curr: current sample points (Q,2), Q is number of sample points
         u_prev_fn: callable; x->(Q,2) 
         
@@ -216,7 +218,6 @@ def gradient_projection(loss_vor, loss_div, params):
 
     # eq17: g_vor = deltaL_vor - (deltaL_vor dot t2) t2
     g_vor = deltaL_vor - torch.dot(deltaL_vor, t2) * t2
-    
     g_div = deltaL_div - torch.dot(deltaL_div, t1) * t1
 
     sizes = [p.numel() for p in params]
@@ -263,6 +264,56 @@ def free_slip_loss(
     loss = torch.abs(normal_component - f).mean()
     return loss
 
-def total_total_loss():
-    #
-    pass
+# L = Lvor +𝜆div Ldiv +𝜆b1 Lb1 +𝜆b2 Lb2 +𝜆aniso Laniso +𝜆vol Lvol +𝜆pos Lpos
+def physics_loss(
+    x: torch.Tensor,
+    y: torch.Tensor,
+    z: torch.Tensor,
+    u_fn,
+    u_prev_fn,
+    normal_fn,
+    f_fn,
+    mu: torch.Tensor,
+    mu_init: torch.Tensor,
+    dt: float,
+    sigma_inv,
+    lam_div = 1.0,
+    lam_b1 = 1.0,
+    lam_b2 = 1.0,
+    lam_aniso = 1.0,
+    lam_vol = 1.0,
+    lam_pos = 1.0,
+) -> torch.Tensor:
+    x = x.requires_grad_(True)
+    u_x = u_fn(x)
+    u_y = u_fn(y)
+    u_z = u_fn(z)
+    
+    # vorticity loss
+    omega_target = advect_vorticity(x, u_prev_fn, dt)
+    L_vor = vorticity_loss(u_x, x, omega_target)
+    
+    # divergence loss
+    L_div = divergence_loss(u_x, x)
+    
+    # b1 loss (no slip)
+    L_b1 = no_slip_loss(u_y, y)
+    
+    # b2 loss (free slip)
+    L_b2 = free_slip_loss(u_z, z, normal_fn, f_fn)
+    
+    # anisotropic loss
+    _, s_inv, _ = torch.linalg.svd(sigma_inv)
+    s = 1.0 / s_inv.clamp(min=1e-8)
+    L_aniso = anisotropic_loss(s)
+    
+    # volume loss
+    L_vol = volume_loss(s)
+    
+    # position loss
+    L_pos = position_loss(mu, mu_init)
+    
+    loss = L_vor + lam_div * L_div + lam_b1 *  L_b1 + lam_b2 * L_b2 + lam_aniso * L_aniso + lam_vol * L_vol + lam_pos * L_pos
+    
+    return loss, L_vor, L_div
+    

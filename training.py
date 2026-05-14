@@ -1,5 +1,5 @@
 import torch
-from loss import total_loss
+from loss import total_loss, physics_loss
 from fields import gaussian, velocity_field, taylor_vortex
 import matplotlib.pyplot as plt
 import numpy as np
