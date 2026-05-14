@@ -74,9 +74,9 @@ def volume_loss(s: torch.Tensor) -> torch.Tensor:
         output: scalar loss tensor
     """
     
-    volumes = torch.prod(s.clamp(min=1e-8), dim=1) # clamp so that we dont divide by 0 
+    volumes = torch.prod(s, dim=1) # clamp so that we dont divide by 0 
     avg_vol = torch.mean(volumes)
-    deviation = (volumes/(avg_vol + 1e-8)) - 1.0
+    deviation = volumes/avg_vol - 1.0
     
     return torch.mean(deviation ** 2)
 
@@ -98,6 +98,7 @@ def total_loss(x: torch.Tensor, mu, sigma_inv, c, v,
     
     jacob_pred = compute_jacobian(x, G, v)
     jacob_target_rows = []
+    # TODO call this with jacobian function
     for d in range(v_target.shape[1]):
         grad_t = torch.autograd.grad(v_target[:, d].sum(), x, create_graph=True)[0]
         jacob_target_rows.append(grad_t)
@@ -109,7 +110,9 @@ def total_loss(x: torch.Tensor, mu, sigma_inv, c, v,
     
     _, s_inv, _ = torch.linalg.svd(sigma_inv)  # s_inv -> (K, D)
     # s = 1.0 / s_inv.clamp(min=1e-8)
-    s = 1.0 / torch.sqrt(s_inv.clamp(min=1e-8))
+    s = 1.0 / torch.sqrt(s_inv.clamp(min=1e-8)) # this would be 10^4 if we clamp 
+    # get rid of this and replace it with an assert 
+    
     # does an svd on sigma_inv then reciprocates
     # s is the singular values of sigma (not sigma_inv)
     L_aniso = anisotropic_loss(s)
@@ -129,20 +132,31 @@ def curl_2d(u: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     du_y = torch.autograd.grad(u[:, 1].sum(), x, create_graph=True)[0]  # (Q,2): [du_y/dx, du_y/dy]
     
     curl = du_y[:, 0] - du_x[:, 1]  # du_y/dx - du_x/dy, shape (Q,)
+    # u_vec = vector(u,v)
     return curl.unsqueeze(1)
 
 
-def advect_vorticity(omega_prev: torch.Tensor, x_prev: torch.Tensor, x_curr: torch.Tensor, u_prev_fn, dt: float) -> torch.Tensor:
+def advect_vorticity(x_curr: torch.Tensor, u_prev_fn, dt: float) -> torch.Tensor:
     """
         eq15
+        w(x) is the curl of the previous velocity field 
+        x_curr: current sample points (Q,2), Q is number of sample points
+        u_prev_fn: callable; x->(Q,2) 
+        
     """
+    # psi^{n-1}(x)
     with torch.no_grad():
         u_at_curr = u_prev_fn(x_curr)
-    x_back = x_curr - dt * u_at_curr
+    x_prev = x_curr - dt * u_at_curr
+    x_prev = x_prev.requires_grad_(True) # (Q,2)
     
-    dists = torch.cdist(x_back, x_prev)
-    idx = dists.argmin(dim=1)
-    return omega_prev[idx]
+    # u^{n-1}(...)
+    u_prev = u_prev_fn(x_prev) # (Q,2)
+    
+    # curl of u with respect to x
+    omega = curl_2d(u_prev, x_prev)
+    # (Q,1)
+    return omega
 
 
 def vorticity_loss(u_pred: torch.Tensor, x: torch.Tensor, omega_target: torch.Tensor) -> torch.Tensor:
@@ -173,3 +187,82 @@ def position_loss(mu: torch.Tensor, mu_init: torch.Tensor) -> torch.Tensor:
     """
     return F.mse_loss(mu, mu_init, reduction='mean')
     
+def gradient_projection(loss_vor, loss_div, params):
+    """
+        eq17, 18
+        
+    """
+
+    # list of one gradient tensor per parameter
+    # (K,D) (K,D,D) (K,D)
+    grad_vor = list(torch.autograd.grad(loss_vor, params, retain_graph=True))
+    grad_div = list(torch.autograd.grad(loss_div, params, retain_graph=True))
+
+    # the paper treats these as single vectors in parameter space
+    # we flatten all param gradients into one long vector to do the math
+    deltaL_vor = torch.cat([g.flatten() for g in grad_vor]) # (K+D+K+D+D+K+D)
+    deltaL_div = torch.cat([g.flatten() for g in grad_div])  
+    
+    dot = torch.dot(deltaL_vor, deltaL_div)
+
+    if dot >= 0:
+        # no conflict, paper says leave gradients unchanged
+        return grad_vor, grad_div
+
+    # t1 = deltaL_vor / ||deltaL_vor||
+    # t2 = deltaL_div / ||deltaL_div||
+    t1 = deltaL_vor / (torch.norm(deltaL_vor) + 1e-8)
+    t2 = deltaL_div / (torch.norm(deltaL_div) + 1e-8)
+
+    # eq17: g_vor = deltaL_vor - (deltaL_vor dot t2) t2
+    g_vor = deltaL_vor - torch.dot(deltaL_vor, t2) * t2
+    
+    g_div = deltaL_div - torch.dot(deltaL_div, t1) * t1
+
+    sizes = [p.numel() for p in params]
+    vor_chunks = g_vor.split(sizes)
+    div_chunks = g_div.split(sizes)
+    # [(16,2), (16,2,2), (16,2)] if K=16, D=2
+    g_vor_final = [chunk.reshape(p.shape) for chunk, p in zip(vor_chunks, params)]
+    g_div_final = [chunk.reshape(p.shape) for chunk, p in zip(div_chunks, params)]
+
+    return g_vor_final, g_div_final
+
+
+def no_slip_loss(u_pred: torch.Tensor, y: torch.Tensor, u_b_fn) -> torch.Tensor:
+    """
+        eq19 
+        
+        u_pred: (Qb1,D)
+        y: (Qb1,D)
+        u_b_fn: callable y->(Qb1,D)
+    """
+    u_b = u_b_fn(y)
+    loss = F.l1_loss(u_pred, u_b, reduction='mean')
+    return loss
+
+def free_slip_loss(
+    u_pred: torch.Tensor,
+    z: torch.Tensor,
+    normal_fn,
+    f_fn
+) -> torch.Tensor:
+    """
+        eq20 
+        
+        u_pred: (Qb2,D)
+        z: (Qb2,D)
+        normal_fn: z->(Qb2,D)
+        f_fn: z->(Qb2,)
+    """
+    n = normal_fn(z) 
+    f = f_fn(z)
+    
+    normal_component = (u_pred * n).sum(d=1) 
+    
+    loss = torch.abs(normal_component - f).mean()
+    return loss
+
+def total_total_loss():
+    #
+    pass

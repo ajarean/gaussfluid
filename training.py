@@ -20,7 +20,7 @@ c = 0.01
 
 optimizer = torch.optim.Adam([mu, L, v], lr=1e-3)
 
-for step in range(500):
+for step in range(1000):
     x = torch.rand(Q,D)
     x.requires_grad_(True)
     
