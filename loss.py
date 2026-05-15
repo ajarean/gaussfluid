@@ -127,6 +127,11 @@ def total_loss(x: torch.Tensor, mu, sigma_inv, c, v,
 def curl_2d(u: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     """
         calculates curl in 2d
+        
+        u: (Q,2) - velocity vectors 
+        x: (Q,2) - sample points
+        
+        returns (Q,1) scalar curl at each sample point
     """
     x = x.requires_grad_(True)
     du_x = torch.autograd.grad(u[:, 0].sum(), x, create_graph=True)[0]  # (Q,2): [du_x/dx, du_x/dy]
@@ -134,7 +139,7 @@ def curl_2d(u: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     
     curl = du_y[:, 0] - du_x[:, 1]  # du_y/dx - du_x/dy, shape (Q,)
     # u_vec = vector(u,v)
-    return curl.unsqueeze(1)
+    return curl.unsqueeze(1) # reshape to (Q,1) to be used in vorticity loss
 
 
 def advect_vorticity(x_curr: torch.Tensor, u_prev_fn, dt: float) -> torch.Tensor:
@@ -144,16 +149,23 @@ def advect_vorticity(x_curr: torch.Tensor, u_prev_fn, dt: float) -> torch.Tensor
         eq15
         omega(x) is the curl of the previous velocity field 
         x_curr: current sample points (Q,2), Q is number of sample points
-        u_prev_fn: callable; x->(Q,2) 
+        u_prev_fn: callable; maps x->(Q,2); represents u^{n-1}
+        dt: float - timestep
+        
+        returns (Q,1) advected vorticity curl x u^{n-1}phi^{n-1}(x) 
         
     """
     # psi^{n-1}(x)
     with torch.no_grad():
         u_at_curr = u_prev_fn(x_curr)
     x_prev = x_curr - dt * u_at_curr
+    # this is a first order euler, but the paper uses rk4
+    
+    
     x_prev = x_prev.requires_grad_(True) # (Q,2)
     
     # u^{n-1}(...)
+    # evaluate u^{n-1} at backmapped locations
     u_prev = u_prev_fn(x_prev) # (Q,2)
     
     # curl of u with respect to x
@@ -165,6 +177,13 @@ def advect_vorticity(x_curr: torch.Tensor, u_prev_fn, dt: float) -> torch.Tensor
 def vorticity_loss(u_pred: torch.Tensor, x: torch.Tensor, omega_target: torch.Tensor) -> torch.Tensor:
     """
         eq13
+        
+        u_pred: (Q,2) - predicted velocity
+        x: (Q,2) - sampled points
+        omega_target: (Q,1) - advected vorticity from eq15 (advect_vorticity)
+        
+        returns scalar 
+        
     """
     omega_pred = curl_2d(u_pred,x)
     loss = F.l1_loss(omega_pred, omega_target, reduction='mean')
@@ -174,6 +193,11 @@ def vorticity_loss(u_pred: torch.Tensor, x: torch.Tensor, omega_target: torch.Te
 def divergence_loss(u_pred: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     """
         eq14
+        
+        u_pred: (Q,2) - predicted velocity
+        x: (Q,2) - sample points
+        
+        returns scalar
     """
     x = x.requires_grad_(True)
     du_x = torch.autograd.grad(u_pred[:, 0].sum(), x, create_graph=True)[0]  # (Q,2)
@@ -187,12 +211,25 @@ def divergence_loss(u_pred: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
 def position_loss(mu: torch.Tensor, mu_init: torch.Tensor) -> torch.Tensor:
     """
         eq21
+        
+        mu: (K,D) - number of optimized centers
+        mu_init: (K,D) - advected target positions
+        
+        returns scalar
     """
     return F.mse_loss(mu, mu_init, reduction='mean')
     
 def gradient_projection(loss_vor, loss_div, params):
     """
+        performs gradient surgery to remove conflicts between vorticity loss and divergence loss (yu et al 2020)
+        we can detect a conflict 
         eq17, 18
+        
+        loss_vor: scalar tensor
+        loss_div: scalar tensor
+        params: [mu (K,D), L (K,D,D), v (K,D)]
+        
+        
         
     """
 
@@ -270,7 +307,7 @@ def free_slip_loss(
 # L = Lvor +𝜆div Ldiv +𝜆b1 Lb1 +𝜆b2 Lb2 +𝜆aniso Laniso +𝜆vol Lvol +𝜆pos Lpos
 def physics_loss(
     x: torch.Tensor,
-    field: GaussianField,
+    field: GaussianField, # use a dataclass to keep the parameters clean
     field_prev: GaussianField,
     bc: BoundaryConditions,
     mu_init: torch.Tensor,
@@ -282,7 +319,13 @@ def physics_loss(
     lam_vol = 1.0,
     lam_pos = 1.0,
 ) -> torch.Tensor:
+    """
+
+    """
     x = x.requires_grad_(True)
+    
+    # evaluate each field at interior and boundary points
+    # field(x) returns a velocity field
     u_interior = field(x)
     u_boundary_n = field(bc.y)
     u_boundary_f = field(bc.z)
