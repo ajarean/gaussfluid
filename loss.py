@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from fields import gaussian, velocity_field, taylor_vortex, GaussianField, BoundaryCounditions
+from fields import gaussian, velocity_field, taylor_vortex, GaussianField, BoundaryConditions
 from typing import Callable
 
 def value_loss(v_pred: torch.Tensor, v_target: torch.Tensor) -> torch.Tensor:
@@ -257,6 +257,8 @@ def free_slip_loss(
         normal_fn: z->(Qb2,D)
         f_fn: z->(Qb2,)
     """
+    if z.shape[0] == 0:
+        return torch.tensor(0.0)
     n = normal_fn(z) 
     f = f_fn(z)
     
@@ -270,7 +272,7 @@ def physics_loss(
     x: torch.Tensor,
     field: GaussianField,
     field_prev: GaussianField,
-    bc: BoundaryCounditions,
+    bc: BoundaryConditions,
     mu_init: torch.Tensor,
     dt: float,
     lam_div = 1.0,
@@ -300,7 +302,7 @@ def physics_loss(
     
     # anisotropic loss
     _, s_inv, _ = torch.linalg.svd(field.sigma_inv)
-    s = 1.0 / s_inv.clamp(min=1e-8)
+    s = 1.0 / torch.sqrt(s_inv.clamp(min=1e-8))
     L_aniso = anisotropic_loss(s)
     
     # volume loss
@@ -309,7 +311,12 @@ def physics_loss(
     # position loss
     L_pos = position_loss(field.mu, mu_init)
     
-    L_rest = L_vor + lam_div * L_div + lam_b1 *  L_b1 + lam_b2 * L_b2 + lam_aniso * L_aniso + lam_vol * L_vol + lam_pos * L_pos
-    
+    # L_rest = L_vor + lam_div * L_div + lam_b1 *  L_b1 + lam_b2 * L_b2 + lam_aniso * L_aniso + lam_vol * L_vol + lam_pos * L_pos
+    L_rest = lam_b1 * L_b1 + lam_b2 * L_b2 + lam_aniso * L_aniso + lam_vol * L_vol + lam_pos * L_pos
+    # for name, val in [("L_vor", L_vor), ("L_div", L_div), ("L_b1", L_b1), 
+    #                 ("L_b2", L_b2), ("L_aniso", L_aniso), ("L_vol", L_vol), ("L_pos", L_pos)]:
+    #     if torch.isnan(val):
+    #         print(f"NaN in {name}")
+
     return L_rest, L_vor, L_div
     

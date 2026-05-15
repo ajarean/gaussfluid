@@ -1,6 +1,6 @@
 import torch
-from loss import total_loss, physics_loss
-from fields import gaussian, velocity_field, taylor_vortex, GaussianField, BoundaryCounditions
+from loss import total_loss, physics_loss, gradient_projection
+from fields import gaussian, velocity_field, taylor_vortex, GaussianField, BoundaryConditions
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -17,6 +17,8 @@ L.requires_grad_(True)
 v = torch.randn(K,D) * 0.1
 v.requires_grad_(True)
 c = 0.01
+
+dt = 0.01
 
 optimizer = torch.optim.Adam([mu, L, v], lr=1e-3)
 
@@ -35,6 +37,42 @@ for step in range(1000):
     if step % 50 == 0:
         print(f"step {step}, loss {loss.item():.4f}")
 
+lam_div = 1.0
+gf_prev = GaussianField(mu.detach().clone(), 
+                        L.detach().clone(), 
+                        v.detach().clone())
+for step in range(1000):
+    x = torch.rand(Q,D)
+    x.requires_grad_(True)
+    
+    with torch.no_grad():
+        mu_init = gf_prev.mu + dt * gf_prev(gf_prev.mu)
+    
+    gf = GaussianField(mu, L, v)
+    bc = BoundaryConditions(y = torch.rand(64,D), 
+                            z = torch.empty(0,D), 
+                            u_b_fn = lambda y: torch.zeros_like(y),
+                            normal_fn = lambda z: torch.zeros_like(z),
+                            f_fn = lambda z: torch.zeros(z.shape[0])) 
+    L_rest, L_vor, L_div = physics_loss(x, gf, gf_prev, bc, mu_init, dt)
+        
+    g_vor, g_div = gradient_projection(L_vor, L_div, gf.params())
+    
+    optimizer.zero_grad()
+    L_rest.backward()
+    
+    for p, gv, gd in zip(gf.params(), g_vor, g_div):
+        p.grad = p.grad + gv + lam_div * gd
+    
+    optimizer.step()
+    gf_prev = GaussianField(mu.detach().clone(), 
+                            L.detach().clone(), 
+                            v.detach().clone())
+        
+    
+    if step % 50 == 0:
+        print(f"step {step}, L_rest {L_rest.item():.4f}, "
+              f"L_vor {L_vor.item():.4f}, L_div {L_div.item():.4f}")
 # GRAPH VISUALIZATION 
 
 # build a meshgrid over [0,1]^2

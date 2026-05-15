@@ -47,8 +47,8 @@ def taylor_vortex(x: torch.Tensor) -> torch.Tensor:
         x -> (Q, 2), returns (Q, 2) velocities
     """
     px, py = x[:, 0], x[:, 1]
-    u = torch.sin(px) * torch.cos(py)
-    v = -torch.cos(px) * torch.sin(py)
+    u = torch.sin(torch.pi * px) * torch.cos(torch.pi * py) #since domain is [0,1], it's fine to scale by pi
+    v = -torch.cos(torch.pi * px) * torch.sin(torch.pi * py)
     return torch.stack([u, v], dim=1)
 
 @dataclass
@@ -71,7 +71,7 @@ class GaussianField:
         return [self.mu, self.L, self.v]
     
 @dataclass
-class BoundaryCounditions:
+class BoundaryConditions:
     y: torch.Tensor
     z: torch.Tensor
     u_b_fn: Callable
