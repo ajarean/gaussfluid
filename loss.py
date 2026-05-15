@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
-from fields import gaussian, velocity_field, taylor_vortex
+from fields import gaussian, velocity_field, taylor_vortex, GaussianField, BoundaryCounditions
+from typing import Callable
 
 def value_loss(v_pred: torch.Tensor, v_target: torch.Tensor) -> torch.Tensor:
     """
@@ -259,7 +260,7 @@ def free_slip_loss(
     n = normal_fn(z) 
     f = f_fn(z)
     
-    normal_component = (u_pred * n).sum(d=1) 
+    normal_component = (u_pred * n).sum(dim=1) 
     
     loss = torch.abs(normal_component - f).mean()
     return loss
@@ -267,16 +268,11 @@ def free_slip_loss(
 # L = Lvor +𝜆div Ldiv +𝜆b1 Lb1 +𝜆b2 Lb2 +𝜆aniso Laniso +𝜆vol Lvol +𝜆pos Lpos
 def physics_loss(
     x: torch.Tensor,
-    y: torch.Tensor,
-    z: torch.Tensor,
-    u_fn,
-    u_prev_fn,
-    normal_fn,
-    f_fn,
-    mu: torch.Tensor,
+    field: GaussianField,
+    field_prev: GaussianField,
+    bc: BoundaryCounditions,
     mu_init: torch.Tensor,
     dt: float,
-    sigma_inv,
     lam_div = 1.0,
     lam_b1 = 1.0,
     lam_b2 = 1.0,
@@ -285,25 +281,25 @@ def physics_loss(
     lam_pos = 1.0,
 ) -> torch.Tensor:
     x = x.requires_grad_(True)
-    u_x = u_fn(x)
-    u_y = u_fn(y)
-    u_z = u_fn(z)
+    u_interior = field(x)
+    u_boundary_n = field(bc.y)
+    u_boundary_f = field(bc.z)
     
     # vorticity loss
-    omega_target = advect_vorticity(x, u_prev_fn, dt)
-    L_vor = vorticity_loss(u_x, x, omega_target)
+    omega_target = advect_vorticity(x, field_prev, dt)
+    L_vor = vorticity_loss(u_interior, x, omega_target)
     
     # divergence loss
-    L_div = divergence_loss(u_x, x)
+    L_div = divergence_loss(u_interior, x)
     
     # b1 loss (no slip)
-    L_b1 = no_slip_loss(u_y, y)
+    L_b1 = no_slip_loss(u_boundary_n, bc.y, bc.u_b_fn)
     
     # b2 loss (free slip)
-    L_b2 = free_slip_loss(u_z, z, normal_fn, f_fn)
+    L_b2 = free_slip_loss(u_boundary_f, bc.z, bc.normal_fn, bc.f_fn)
     
     # anisotropic loss
-    _, s_inv, _ = torch.linalg.svd(sigma_inv)
+    _, s_inv, _ = torch.linalg.svd(field.sigma_inv)
     s = 1.0 / s_inv.clamp(min=1e-8)
     L_aniso = anisotropic_loss(s)
     
@@ -311,9 +307,9 @@ def physics_loss(
     L_vol = volume_loss(s)
     
     # position loss
-    L_pos = position_loss(mu, mu_init)
+    L_pos = position_loss(field.mu, mu_init)
     
-    loss = L_vor + lam_div * L_div + lam_b1 *  L_b1 + lam_b2 * L_b2 + lam_aniso * L_aniso + lam_vol * L_vol + lam_pos * L_pos
+    L_rest = L_vor + lam_div * L_div + lam_b1 *  L_b1 + lam_b2 * L_b2 + lam_aniso * L_aniso + lam_vol * L_vol + lam_pos * L_pos
     
-    return loss, L_vor, L_div
+    return L_rest, L_vor, L_div
     

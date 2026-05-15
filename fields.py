@@ -1,5 +1,7 @@
 import torch
 import torch.nn.functional as F
+from dataclasses import dataclass
+from typing import Callable
 
 # https://arxiv.org/pdf/2405.18133
 # ^ the paper
@@ -48,3 +50,30 @@ def taylor_vortex(x: torch.Tensor) -> torch.Tensor:
     u = torch.sin(px) * torch.cos(py)
     v = -torch.cos(px) * torch.sin(py)
     return torch.stack([u, v], dim=1)
+
+@dataclass
+class GaussianField:
+    mu: torch.Tensor
+    L: torch.Tensor
+    v: torch.Tensor
+    c: float = 0.01
+    
+    @property
+    def sigma_inv(self):
+        L = torch.tril(self.L)
+        return L @ L.transpose(-1,-2)
+    
+    def __call__(self, x):
+        G = gaussian(x, self.mu, self.sigma_inv, self.c)
+        return velocity_field(G, self.v)
+
+    def params(self):
+        return [self.mu, self.L, self.v]
+    
+@dataclass
+class BoundaryCounditions:
+    y: torch.Tensor
+    z: torch.Tensor
+    u_b_fn: Callable
+    normal_fn: Callable
+    f_fn: Callable
