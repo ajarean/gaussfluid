@@ -45,7 +45,6 @@ def taylor_vortex(x: torch.Tensor) -> torch.Tensor:
         x -> (Q, 2), returns (Q, 2) velocities
     """
     px, py = x[:, 0], x[:, 1]
-    # TODO FIX
-    u = -torch.sin(torch.pi * py) * torch.cos(torch.pi * px)
-    v =  torch.cos(torch.pi * py) * torch.sin(torch.pi * px)
+    u = torch.sin(px) * torch.cos(py)
+    v = -torch.cos(px) * torch.sin(py)
     return torch.stack([u, v], dim=1)
