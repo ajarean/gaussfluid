@@ -74,36 +74,40 @@ for step in range(1000):
     if step % 50 == 0:
         print(f"step {step}, loss {loss.item():.4f}")
 
-lam_div = 1.0
-gf_prev = GaussianField(mu.detach().clone(), 
-                        L.detach().clone(), 
+lam_div = 5.0
+gf_prev = GaussianField(mu.detach().clone(),
+                        L.detach().clone(),
                         v.detach().clone())
+# fresh optimizer: discard Adam's exp_avg / exp_avg_sq from the init phase,
+# which pre-conditioned the effective lr for a different loss landscape
+optimizer = torch.optim.Adam([mu, L, v], lr=1e-3)
 for step in range(1000):
     x = torch.rand(Q,D)
     x.requires_grad_(True)
-    
+
     with torch.no_grad():
         mu_init = gf_prev.mu + dt * gf_prev(gf_prev.mu)
-    
+
     gf = GaussianField(mu, L, v)
-    bc = BoundaryConditions(y = torch.empty(0,D), # y = torch.rand(64,D), 
-                            z = torch.empty(0,D), 
+    bc = BoundaryConditions(y = torch.empty(0,D), # y = torch.rand(64,D),
+                            z = torch.empty(0,D),
                             u_b_fn = lambda y: torch.zeros_like(y),
                             normal_fn = lambda z: torch.zeros_like(z),
-                            f_fn = lambda z: torch.zeros(z.shape[0])) 
+                            f_fn = lambda z: torch.zeros(z.shape[0]))
     L_rest, L_vor, L_div = physics_loss(x, gf, gf_prev, bc, mu_init, dt, lam_pos=5.0, lam_aniso=5.0, lam_vol=5.0)
-        
-    g_vor, g_div = gradient_projection(L_vor, L_div, gf.params())
-    
+
+    # zero and backward first so p.grad is clean before surgery gradients are added;
+    # retain_graph so the shared graph is still alive for gradient_projection afterward
     optimizer.zero_grad()
-    L_rest.backward()
-    
+    L_rest.backward(retain_graph=True)
+
+    g_vor, g_div = gradient_projection(L_vor, L_div, gf.params())
     for p, gv, gd in zip(gf.params(), g_vor, g_div):
         if p.grad is None:
             p.grad = gv + lam_div * gd
         else:
             p.grad = p.grad + gv + lam_div * gd
-    
+
     optimizer.step()
     gf_prev = GaussianField(mu.detach().clone(), 
                             L.detach().clone(), 

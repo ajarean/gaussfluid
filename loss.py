@@ -124,54 +124,49 @@ def total_loss(x: torch.Tensor, mu, sigma_inv, c, v,
 
 # 5.2 of the paper
 
-def curl_2d(u: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+def curl_2d(u: torch.Tensor, x: torch.Tensor, create_graph: bool = True) -> torch.Tensor:
     """
         calculates curl in 2d
-        
-        u: (Q,2) - velocity vectors 
+
+        u: (Q,2) - velocity vectors
         x: (Q,2) - sample points
-        
+        create_graph: True when the curl must be differentiable w.r.t. params
+                      (vorticity/divergence losses); False for constant targets
+
         returns (Q,1) scalar curl at each sample point
     """
     x = x.requires_grad_(True)
-    du_x = torch.autograd.grad(u[:, 0].sum(), x, create_graph=True)[0]  # (Q,2): [du_x/dx, du_x/dy]
-    du_y = torch.autograd.grad(u[:, 1].sum(), x, create_graph=True)[0]  # (Q,2): [du_y/dx, du_y/dy]
-    
+    du_x = torch.autograd.grad(u[:, 0].sum(), x, create_graph=create_graph, retain_graph=True)[0]  # (Q,2): [du_x/dx, du_x/dy]
+    du_y = torch.autograd.grad(u[:, 1].sum(), x, create_graph=create_graph)[0]  # (Q,2): [du_y/dx, du_y/dy]
+
     curl = du_y[:, 0] - du_x[:, 1]  # du_y/dx - du_x/dy, shape (Q,)
-    # u_vec = vector(u,v)
-    return curl.unsqueeze(1) # reshape to (Q,1) to be used in vorticity loss
+    return curl.unsqueeze(1)
 
 
 def advect_vorticity(x_curr: torch.Tensor, u_prev_fn, dt: float) -> torch.Tensor:
-    # TODO pass in u_prev from prev timestep
-    
     """
         eq15
-        omega(x) is the curl of the previous velocity field 
+        omega(x) is the curl of the previous velocity field
         x_curr: current sample points (Q,2), Q is number of sample points
         u_prev_fn: callable; maps x->(Q,2); represents u^{n-1}
         dt: float - timestep
-        
-        returns (Q,1) advected vorticity curl x u^{n-1}phi^{n-1}(x) 
-        
+
+        returns (Q,1) advected vorticity (curl of u^{n-1} at backtraced positions),
+        detached -- callers treat it as a constant target
     """
-    # psi^{n-1}(x)
+    # RK4 backtrace (eq15: psi^{n-1}(x)).
     with torch.no_grad():
-        u_at_curr = u_prev_fn(x_curr)
-    x_prev = x_curr - dt * u_at_curr
-    # this is a first order euler, but the paper uses rk4
-    
-    
-    x_prev = x_prev.requires_grad_(True) # (Q,2)
-    
-    # u^{n-1}(...)
-    # evaluate u^{n-1} at backmapped locations
-    u_prev = u_prev_fn(x_prev) # (Q,2)
-    
-    # curl of u with respect to x
-    omega = curl_2d(u_prev, x_prev)
-    # (Q,1)
-    return omega
+        k1 = u_prev_fn(x_curr)
+        k2 = u_prev_fn(x_curr - 0.5 * dt * k1)
+        k3 = u_prev_fn(x_curr - 0.5 * dt * k2)
+        k4 = u_prev_fn(x_curr - dt * k3)
+        x_prev = x_curr - (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+
+    x_prev = x_prev.requires_grad_(True)
+
+    u_prev = u_prev_fn(x_prev)
+    omega = curl_2d(u_prev, x_prev, create_graph=False)  # target value only; no graph needed
+    return omega.detach()  # protect previous timestep
 
 
 def vorticity_loss(u_pred: torch.Tensor, x: torch.Tensor, omega_target: torch.Tensor) -> torch.Tensor:
