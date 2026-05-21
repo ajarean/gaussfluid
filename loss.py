@@ -276,6 +276,8 @@ def no_slip_loss(u_pred: torch.Tensor, y: torch.Tensor, u_b_fn) -> torch.Tensor:
         y: (Qb1,D)
         u_b_fn: callable y->(Qb1,D)
     """
+    if y.shape[0] == 0:
+        return torch.tensor(0.0)
     u_b = u_b_fn(y)
     loss = F.l1_loss(u_pred, u_b, reduction='mean')
     return loss
@@ -320,7 +322,17 @@ def physics_loss(
     lam_pos = 1.0,
 ) -> torch.Tensor:
     """
-
+        returns the total physics loss, the divergence loss, and vorticity loss
+        the latter two are handled separately because they fight against each other, so we need to do gradient surgery to remove the conflictign parts
+        
+        x: (Q,D)
+        field: current timestep GSR
+        field_prev: prev timestep GSR
+        bc: boundary sample points and functions
+        mu_init: (K,D) - advected particle centers
+        lam_*: weights
+        
+        
     """
     x = x.requires_grad_(True)
     

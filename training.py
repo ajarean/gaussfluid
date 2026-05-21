@@ -54,7 +54,7 @@ v = torch.randn(K,D) * 0.1
 v.requires_grad_(True)
 c = 0.01
 
-dt = 0.01
+dt = 0.001
 
 optimizer = torch.optim.Adam([mu, L, v], lr=1e-3)
 
@@ -86,12 +86,12 @@ for step in range(1000):
         mu_init = gf_prev.mu + dt * gf_prev(gf_prev.mu)
     
     gf = GaussianField(mu, L, v)
-    bc = BoundaryConditions(y = torch.rand(64,D), 
+    bc = BoundaryConditions(y = torch.empty(0,D), # y = torch.rand(64,D), 
                             z = torch.empty(0,D), 
                             u_b_fn = lambda y: torch.zeros_like(y),
                             normal_fn = lambda z: torch.zeros_like(z),
                             f_fn = lambda z: torch.zeros(z.shape[0])) 
-    L_rest, L_vor, L_div = physics_loss(x, gf, gf_prev, bc, mu_init, dt)
+    L_rest, L_vor, L_div = physics_loss(x, gf, gf_prev, bc, mu_init, dt, lam_pos=5.0, lam_aniso=5.0, lam_vol=5.0)
         
     g_vor, g_div = gradient_projection(L_vor, L_div, gf.params())
     
@@ -99,7 +99,10 @@ for step in range(1000):
     L_rest.backward()
     
     for p, gv, gd in zip(gf.params(), g_vor, g_div):
-        p.grad = p.grad + gv + lam_div * gd
+        if p.grad is None:
+            p.grad = gv + lam_div * gd
+        else:
+            p.grad = p.grad + gv + lam_div * gd
     
     optimizer.step()
     gf_prev = GaussianField(mu.detach().clone(), 
@@ -149,4 +152,5 @@ x_grid = torch.stack([grid_x.flatten(), grid_y.flatten()], dim=1)  # (res^2, 2)
 # plt.tight_layout()
 
 imageio.mimsave('training.gif', frames, fps=10)
+print("saved training.gif")
 plt.show()
