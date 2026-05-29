@@ -168,6 +168,11 @@ def advect_vorticity(x_curr: torch.Tensor, u_prev_fn, dt: float) -> torch.Tensor
     omega = curl_2d(u_prev, x_prev, create_graph=False)  # target value only; no graph needed
     return omega.detach()  # protect previous timestep
 
+    # TODO formulate RK as a seq of forward euler
+    # add rotational step in addition to linear
+    # treat as rigid body (only if 3d)
+    # rotate principle axes (i.e. major and minor axis)
+
 
 def vorticity_loss(u_pred: torch.Tensor, x: torch.Tensor, omega_target: torch.Tensor) -> torch.Tensor:
     """
@@ -212,7 +217,11 @@ def position_loss(mu: torch.Tensor, mu_init: torch.Tensor) -> torch.Tensor:
         
         returns scalar
     """
-    return F.mse_loss(mu, mu_init, reduction='mean')
+    # return F.mse_loss(mu, mu_init, reduction='mean')
+    if mu_init.shape[0] == 0:
+        return torch.tensor(0.0)
+    K = mu_init.shape[0]
+    return F.mse_loss(mu[:K], mu_init, reduction='mean')
     
 def gradient_projection(loss_vor, loss_div, params):
     """
@@ -231,7 +240,7 @@ def gradient_projection(loss_vor, loss_div, params):
     # list of one gradient tensor per parameter
     # (K,D) (K,D,D) (K,D)
     grad_vor = list(torch.autograd.grad(loss_vor, params, retain_graph=True))
-    grad_div = list(torch.autograd.grad(loss_div, params, retain_graph=True))
+    grad_div = list(torch.autograd.grad(loss_div, params, retain_graph=False))
 
     # the paper treats these as single vectors in parameter space
     # we flatten all param gradients into one long vector to do the math
