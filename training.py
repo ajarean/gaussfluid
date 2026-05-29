@@ -108,20 +108,50 @@ def reseed(
 
     return new_mu, new_L, new_v
 
+
 def capture_frame(step, label):
     with torch.no_grad():
         sigma_inv = torch.tril(L) @ torch.tril(L).transpose(-1, -2)
         G = gaussian(x_grid, mu, sigma_inv, c)
         u_pred = velocity_field(G, v).numpy()
+
     U_pred = u_pred[:, 0].reshape(res, res)
     V_pred = u_pred[:, 1].reshape(res, res)
+
+    # learned vorticity
+    x_grid_g = x_grid.clone().requires_grad_(True)
+    sigma_inv_v = torch.tril(L) @ torch.tril(L).transpose(-1, -2)
+    G_v = gaussian(x_grid_g, mu, sigma_inv_v, c)
+    u_grid = velocity_field(G_v, v)
+    omega_pred = curl_2d(u_grid, x_grid_g, create_graph=False).detach().numpy()
+    omega_pred_grid = omega_pred.reshape(res, res)
+
+    # target vorticity
+    py = grid_x.numpy()
+    px = grid_y.numpy()
+    omega_tgt_grid = 2 * np.pi * np.sin(np.pi * py) * np.sin(np.pi * px)
+    
+    # shared colorscale 
+    vmax = max(abs(omega_tgt_grid.max()), abs(omega_pred_grid.max()), 1e-3)
+
     axes[0].cla()
     axes[1].cla()
-    axes[0].streamplot(xs.numpy(), ys.numpy(), U_tgt.T, V_tgt.T)
-    axes[1].streamplot(xs.numpy(), ys.numpy(), U_pred.T, V_pred.T)
+
+    # target
+    # https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.contourf.html
+    axes[0].contourf(xs.numpy(), ys.numpy(), omega_tgt_grid.T,
+                     levels=40, cmap='RdBu_r', vmin=-vmax, vmax=vmax)
+    axes[0].streamplot(xs.numpy(), ys.numpy(), U_tgt.T, V_tgt.T,
+                       color='k', linewidth=0.8, density=1.2)
     axes[0].set_title('Taylor Vortex (target)')
+
+    # learned 
+    axes[1].contourf(xs.numpy(), ys.numpy(), omega_pred_grid.T,
+                     levels=40, cmap='RdBu_r', vmin=-vmax, vmax=vmax)
+    axes[1].streamplot(xs.numpy(), ys.numpy(), U_pred.T, V_pred.T,
+                       color='k', linewidth=0.8, density=1.2)
     axes[1].set_title(f'{label} - step {step}')
-    
+
     buf = io.BytesIO()
     fig.savefig(buf, format='png')
     buf.seek(0)
