@@ -41,6 +41,19 @@ def velocity_field(G: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
     u = torch.einsum('nk,kd->nd', G, v)
     return u
 
+def field_and_jacobian(x: torch.Tensor, mu: torch.Tensor, sigma_inv: torch.Tensor,
+                       c: float, v: torch.Tensor):
+    diff = x.unsqueeze(1) - mu.unsqueeze(0)
+    Sinv_diff = torch.einsum('kij,nkj->nki', sigma_inv, diff)
+    exponent = (diff * Sinv_diff).sum(dim=-1)
+    G = torch.exp(-0.5 * exponent)
+
+    u = torch.einsum('nk,ka->na', torch.relu(G - c), v)
+
+    w = G * (G > c)
+    J = -torch.einsum('nk,ka,nkb->nab', w, v, Sinv_diff)
+    return u, J
+
 def taylor_vortex(x: torch.Tensor) -> torch.Tensor:
     """
         eq 22 (same quantitative baseline as paper)
@@ -112,6 +125,9 @@ class GaussianField:
 
     def params(self):
         return [self.mu, self.L, self.v]
+    
+    def value_and_jacobian(self, x):
+        return field_and_jacobian(x, self.mu, self._sigma_inv, self.c, self.v)
     
 @dataclass
 class BoundaryConditions:
