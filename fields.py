@@ -51,6 +51,46 @@ def taylor_vortex(x: torch.Tensor) -> torch.Tensor:
     v = -torch.cos(torch.pi * px) * torch.sin(torch.pi * py)
     return torch.stack([u, v], dim=1)
 
+
+LEAPFROG_U = 0.5
+LEAPFROG_A = 0.3
+LEAPFROG_POSITIONS = [
+    (-3., -3.,  1.0),
+    (-1., -3.,  1.0),
+    ( 1., -3., -1.0),
+    ( 3., -3., -1.0),
+]
+
+def vortex_particle(x, x0, radius, magnitude):
+    """
+        single vortex velocity field
+        x  -> (Q, 2) query points
+        x0 -> (2,)   vortex center
+        radius -> core size a
+        magnitude -> signed strength
+        returns -> (Q, 2) velocity
+    """
+    eps = 1e-6
+    dx = x - x0
+    r = (dx ** 2).sum(dim=-1) ** 0.5
+    exp_term = torch.exp(-((r + eps) / radius) ** 2)
+    coeff = magnitude * (r + eps) ** -2 * (1.0 - exp_term)
+    perp = torch.stack([-dx[:, 1], dx[:, 0]], dim=-1)
+    return coeff[:, None] * perp
+
+
+def leapfrog(x: torch.Tensor) -> torch.Tensor:
+    """
+        leapfrog initial condition: 4 vortices in a row, alternating-sign pairs
+        x -> (Q, 2),  domain is [-5, 5]^2
+        returns -> (Q, 2) velocity
+    """
+    u = torch.zeros_like(x)
+    for vx, vy, sign in LEAPFROG_POSITIONS:
+        center = torch.tensor([vx, vy], device=x.device, dtype=x.dtype)
+        u = u + vortex_particle(x, center, LEAPFROG_A, sign * LEAPFROG_U)
+    return u
+
 @dataclass
 class GaussianField:
     mu: torch.Tensor

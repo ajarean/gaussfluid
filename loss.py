@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from fields import gaussian, velocity_field, taylor_vortex, GaussianField, BoundaryConditions
+from fields import gaussian, velocity_field, taylor_vortex, leapfrog, GaussianField, BoundaryConditions
 from typing import Callable
 
 def value_loss(v_pred: torch.Tensor, v_target: torch.Tensor) -> torch.Tensor:
@@ -93,7 +93,8 @@ def total_loss(x: torch.Tensor, mu, sigma_inv, c, v,
     
     G = gaussian(x, mu, sigma_inv, c)
     v_pred = velocity_field(G, v)
-    v_target = taylor_vortex(x)
+    # v_target = taylor_vortex(x)
+    v_target = leapfrog(x)
     L_val = value_loss(v_pred, v_target)
     
     

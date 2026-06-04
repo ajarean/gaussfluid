@@ -1,6 +1,6 @@
 import torch
 from loss import total_loss, physics_loss, gradient_projection, curl_2d, advect_vorticity
-from fields import gaussian, velocity_field, taylor_vortex, GaussianField, BoundaryConditions
+from fields import gaussian, velocity_field, taylor_vortex, leapfrog, GaussianField, BoundaryConditions
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import numpy as np
@@ -9,18 +9,21 @@ import io
 from PIL import Image
 
 res = 32
-xs = torch.linspace(0, 1, res)
-ys = torch.linspace(0, 1, res)
+# xs = torch.linspace(0, 1, res)
+xs = torch.linspace(-5, 5, res)
+# ys = torch.linspace(0, 1, res)
+ys = torch.linspace(-5, 5, res)
 grid_x, grid_y = torch.meshgrid(xs, ys, indexing='ij')
 x_grid = torch.stack([grid_x.flatten(), grid_y.flatten()], dim=1)
-u_target = taylor_vortex(x_grid).numpy()
+# u_target = taylor_vortex(x_grid).numpy()
+u_target = leapfrog(x_grid).numpy()
 U_tgt = u_target[:, 0].reshape(res, res)
 V_tgt = u_target[:, 1].reshape(res, res)
 
 fig, axes = plt.subplots(1, 2, figsize=(10, 4))
 frames = []
 
-MAX_K = 64
+MAX_K = 256
 
 # https://arxiv.org/pdf/2308.04079
 def reseed(
@@ -29,7 +32,7 @@ def reseed(
     v: torch.Tensor,
     field_fn=None,
     r_aniso: float = 2.0,
-    K_max: int = 64,
+    K_max: int = MAX_K,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     section 5.3: splits elongated Gaussians into two rounder ones
@@ -81,8 +84,10 @@ def reseed(
     disp_1 = (split_U @ (sqrt_s.unsqueeze(-1) * eps_1)).squeeze(-1)  # (M, D)
     disp_2 = (split_U @ (sqrt_s.unsqueeze(-1) * eps_2)).squeeze(-1)  # (M, D)
 
-    new_mu_1 = torch.clamp(split_mu + disp_1, 0.0, 1.0)
-    new_mu_2 = torch.clamp(split_mu + disp_2, 0.0, 1.0)
+    # new_mu_1 = torch.clamp(split_mu + disp_1, 0.0, 1.0)
+    new_mu_1 = torch.clamp(split_mu + disp_1, -5.0, 5.0)
+    # new_mu_2 = torch.clamp(split_mu + disp_2, 0.0, 1.0)
+    new_mu_2 = torch.clamp(split_mu + disp_2, -5.0, 5.0)
 
     # fix anisotropy
     new_s_inv = s_inv[split_mask].clone()   # (M, D) descending s_inv
@@ -127,9 +132,13 @@ def capture_frame(step, label):
     omega_pred_grid = omega_pred.reshape(res, res)
 
     # target vorticity
-    py = grid_x.numpy()
-    px = grid_y.numpy()
-    omega_tgt_grid = 2 * np.pi * np.sin(np.pi * py) * np.sin(np.pi * px)
+    # py = grid_x.numpy()
+    # px = grid_y.numpy()
+    # omega_tgt_grid = 2 * np.pi * np.sin(np.pi * py) * np.sin(np.pi * px)
+    # pythonx_grid_g = x_grid.clone().requires_grad_(True)
+    u_tgt_grid = leapfrog(x_grid_g)
+    omega_tgt = curl_2d(u_tgt_grid, x_grid_g, create_graph=False).detach().numpy()
+    omega_tgt_grid = omega_tgt.reshape(res, res)
     
     # shared colorscale 
     vmax = max(abs(omega_tgt_grid.max()), abs(omega_pred_grid.max()), 1e-3)
@@ -159,11 +168,12 @@ def capture_frame(step, label):
     buf.close()
     frames.append(img)
 
-K = 16 # number of Gaussians
+K = 100 # number of Gaussians
 D = 2 # num of dimensions
 Q = 256 # sampled points per iteration
 
-mu = torch.rand(K,D)
+# mu = torch.rand(K,D)
+mu = (torch.rand(K, D) * 10.0 - 5.0).requires_grad_(True)
 mu.requires_grad_(True)
 
 L = torch.eye(D).repeat(K,1,1) # use tril() to enforce lower triangualr
@@ -173,12 +183,13 @@ v = torch.randn(K,D) * 0.1
 v.requires_grad_(True)
 c = 0.01
 
-dt = 0.001
+dt = 0.01
 
 optimizer = torch.optim.Adam([mu, L, v], lr=1e-3)
 
 for step in range(1000):
-    x = torch.rand(Q,D)
+    # x = torch.rand(Q,D)
+    x = torch.rand(Q,D) * 10.0 - 5.0
     x.requires_grad_(True)
     
     sigma_inv = torch.tril(L) @ torch.tril(L).transpose(-1, -2)
@@ -195,9 +206,9 @@ for step in range(1000):
     if step % 50 == 0:
         print(f"step {step}, loss {loss.item():.4f}")
 
-N_inner       = 5
+N_inner = 5
 N_warmup_reseed = 100 # extra inner steps after a reseed event to activate children
-N_time  = 200
+N_time  = 1000
 lam_div = 1.0
 
 gf_prev = GaussianField(mu.detach().clone(), L.detach().clone(), v.detach().clone())
@@ -235,11 +246,11 @@ for t in range(N_time):
 
     # inner optimization loop -- gf_prev fixed throughout
     for inner in range(n_steps):
-        x = torch.rand(Q, D).requires_grad_(True)
+        x = (torch.rand(Q, D) * 10.0 - 5.0).requires_grad_(True)
         gf = GaussianField(mu, L, v)
 
         L_rest, L_vor, L_div = physics_loss(x, gf, gf_prev, bc, mu_init, dt,
-                                             lam_pos=5.0, lam_aniso=5.0, lam_vol=5.0)
+                                             lam_pos=0.5, lam_aniso=5.0, lam_vol=5.0)
 
         for name, val in [("L_rest", L_rest), ("L_vor", L_vor), ("L_div", L_div)]:
             if torch.isnan(val) or torch.isinf(val):
@@ -259,7 +270,7 @@ for t in range(N_time):
         capture_frame(t, f'Physics t={t}')
 
     if t % 10 == 0:
-        x_d = torch.rand(500, D)
+        x_d = torch.rand(500, D) * 10.0 - 5.0
         omega_tgt = advect_vorticity(x_d, gf_prev, dt)
         x_d_g = x_d.clone().requires_grad_(True)
         u_d = gf(x_d_g)
@@ -272,11 +283,11 @@ for t in range(N_time):
 # GRAPH VISUALIZATION 
 
 # build a meshgrid over [0,1]^2
-res = 32
-xs = torch.linspace(0, 1, res)
-ys = torch.linspace(0, 1, res)
-grid_x, grid_y = torch.meshgrid(xs, ys, indexing='ij')
-x_grid = torch.stack([grid_x.flatten(), grid_y.flatten()], dim=1)  # (res^2, 2)
+# res = 32
+# xs = torch.linspace(0, 1, res)
+# ys = torch.linspace(0, 1, res)
+# grid_x, grid_y = torch.meshgrid(xs, ys, indexing='ij')
+# x_grid = torch.stack([grid_x.flatten(), grid_y.flatten()], dim=1)  # (res^2, 2)
 
 
 # uncomment this part for the static image output
