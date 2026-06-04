@@ -196,7 +196,6 @@ dt = 0.01
 optimizer = torch.optim.Adam([mu, L, v], lr=1e-3)
 
 for step in range(1000):
-    # x = torch.rand(Q,D)
     x = torch.rand(Q,D) * 10.0 - 5.0
     x.requires_grad_(True)
     
@@ -264,7 +263,8 @@ for t in range(N_time):
 
     with cm as prof:
         for inner in range(n_steps):
-            x = (torch.rand(Q, D) * 10.0 - 5.0).requires_grad_(True)
+            # x = (torch.rand(Q, D) * 10.0 - 5.0).requires_grad_(True)
+            x = torch.rand(Q, D) * 10.0 - 5.0 
             gf = GaussianField(mu, L, v)
 
             L_rest, L_vor, L_div = physics_loss(x, gf, gf_prev, bc, mu_init, dt,

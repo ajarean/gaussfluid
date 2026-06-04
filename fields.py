@@ -43,15 +43,21 @@ def velocity_field(G: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
 
 def field_and_jacobian(x: torch.Tensor, mu: torch.Tensor, sigma_inv: torch.Tensor,
                        c: float, v: torch.Tensor):
+    N, D_in = x.shape
+    K = mu.shape[0]
+    D_out = v.shape[1]
+
     diff = x.unsqueeze(1) - mu.unsqueeze(0)
-    Sinv_diff = torch.einsum('kij,nkj->nki', sigma_inv, diff)
-    exponent = (diff * Sinv_diff).sum(dim=-1)
+    Sinv_diff = (sigma_inv.unsqueeze(0) * diff.unsqueeze(2)).sum(-1)
+    exponent = (diff * Sinv_diff).sum(-1)
     G = torch.exp(-0.5 * exponent)
 
-    u = torch.einsum('nk,ka->na', torch.relu(G - c), v)
+    u = torch.relu(G - c) @ v 
 
     w = G * (G > c)
-    J = -torch.einsum('nk,ka,nkb->nab', w, v, Sinv_diff)
+    P = w.unsqueeze(-1) * Sinv_diff
+    J = -(P.permute(0, 2, 1).reshape(N * D_in, K) @ v)
+    J = J.reshape(N, D_in, D_out).permute(0, 2, 1)
     return u, J
 
 def taylor_vortex(x: torch.Tensor) -> torch.Tensor:
