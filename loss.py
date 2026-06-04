@@ -203,6 +203,15 @@ def vorticity_loss(u_pred: torch.Tensor, x: torch.Tensor, omega_target: torch.Te
     loss = F.l1_loss(omega_pred, omega_target, reduction='mean')
     return loss
 
+def vorticity_from_jacobian(J: torch.Tensor, omega_target: torch.Tensor) -> torch.Tensor:
+    """
+        eq13, vorticity loss from the analytic Jacobian (no autograd for the spatial deriv).
+        J: (Q, 2, 2), J[:, a, b] = d u_a / d x_b
+        omega_target: (Q, 1) advected target vorticity
+        returns scalar
+    """
+    omega_pred = (J[:, 1, 0] - J[:, 0, 1]).unsqueeze(1)   # (Q, 1) -- keep the trailing dim!
+    return F.l1_loss(omega_pred, omega_target, reduction='mean')
 
 def divergence_loss(u_pred: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     """
@@ -371,7 +380,7 @@ def physics_loss(
     
     # vorticity loss
     omega_target = advect_vorticity(x, field_prev, dt)
-    L_vor = vorticity_loss(u_interior, x, omega_target)
+    L_vor = vorticity_from_jacobian(J_interior, omega_target)
     
     # divergence loss
     # L_div = divergence_loss(u_interior, x)
