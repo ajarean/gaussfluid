@@ -1,4 +1,7 @@
 import torch
+import contextlib
+from torch.profiler import profile, schedule, ProfilerActivity
+
 from loss import total_loss, physics_loss, gradient_projection, curl_2d, advect_vorticity
 from fields import gaussian, velocity_field, taylor_vortex, leapfrog, GaussianField, BoundaryConditions
 import matplotlib.pyplot as plt
@@ -24,6 +27,9 @@ fig, axes = plt.subplots(1, 2, figsize=(10, 4))
 frames = []
 
 MAX_K = 256
+
+PROFILE_T = 2
+prof_sched = schedule(wait=1, warmup=1, active=3, repeat=1)
 
 # https://arxiv.org/pdf/2308.04079
 def reseed(
@@ -245,26 +251,43 @@ for t in range(N_time):
     n_steps = N_warmup_reseed if reseeded else N_inner
 
     # inner optimization loop -- gf_prev fixed throughout
-    for inner in range(n_steps):
-        x = (torch.rand(Q, D) * 10.0 - 5.0).requires_grad_(True)
-        gf = GaussianField(mu, L, v)
+    profiling = (t == PROFILE_T)
+    cm = profile(
+        activities=[ProfilerActivity.CPU],
+        schedule=prof_sched,
+        record_shapes=True,
+        profile_memory=False,
+        with_stack=False,
+    ) if profiling else contextlib.nullcontext()
 
-        L_rest, L_vor, L_div = physics_loss(x, gf, gf_prev, bc, mu_init, dt,
-                                             lam_pos=0.5, lam_aniso=5.0, lam_vol=5.0)
+    with cm as prof:
+        for inner in range(n_steps):
+            x = (torch.rand(Q, D) * 10.0 - 5.0).requires_grad_(True)
+            gf = GaussianField(mu, L, v)
 
-        for name, val in [("L_rest", L_rest), ("L_vor", L_vor), ("L_div", L_div)]:
-            if torch.isnan(val) or torch.isinf(val):
-                print(f"  [NaN t={t} inner={inner}] {name}={val.item()}", flush=True)
+            L_rest, L_vor, L_div = physics_loss(x, gf, gf_prev, bc, mu_init, dt,
+                                                lam_pos=0.5, lam_aniso=5.0, lam_vol=5.0)
 
-        optimizer.zero_grad()
-        L_rest.backward(retain_graph=True)
-        g_vor, g_div = gradient_projection(L_vor, L_div, gf.params())
-        for p, gv, gd in zip(gf.params(), g_vor, g_div):
-            if p.grad is None:
-                p.grad = gv + lam_div * gd
-            else:
-                p.grad = p.grad + gv + lam_div * gd
-        optimizer.step()
+            for name, val in [("L_rest", L_rest), ("L_vor", L_vor), ("L_div", L_div)]:
+                if torch.isnan(val) or torch.isinf(val):
+                    print(f"  [NaN t={t} inner={inner}] {name}={val.item()}", flush=True)
+
+            optimizer.zero_grad()
+            L_rest.backward(retain_graph=True)
+            g_vor, g_div = gradient_projection(L_vor, L_div, gf.params())
+            for p, gv, gd in zip(gf.params(), g_vor, g_div):
+                if p.grad is None:
+                    p.grad = gv + lam_div * gd
+                else:
+                    p.grad = p.grad + gv + lam_div * gd
+            optimizer.step()
+            if profiling:
+                prof.step()
+    if profiling:
+        print(prof.key_averages(group_by_input_shape=True).table(
+            sort_by="self_cpu_time_total", row_limit=25))
+        prof.export_chrome_trace("trace_inner_step.json")
+        break
 
     if t % 10 == 0:
         capture_frame(t, f'Physics t={t}')
