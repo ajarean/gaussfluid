@@ -3,6 +3,21 @@ import torch.nn.functional as F
 from fields import gaussian, velocity_field, taylor_vortex, leapfrog, GaussianField, BoundaryConditions
 from typing import Callable
 
+def sym2x2_eigvals(M: torch.Tensor) -> torch.Tensor:
+    """
+        Eigenvalues of a batch of symmetric 2x2 matrices, in closed form.
+        M: (K, 2, 2), assumed symmetric (Sigma^{-1} = L L^T is symmetric to float precision)
+        
+        returns: (K, 2) eigenvalues. Order is not guaranteed, which is fine because
+        the aniso/volume losses only use max/min/prod over the last dim.
+    """
+    a = M[:, 0, 0]
+    b = 0.5 * (M[:, 0, 1] + M[:, 1, 0])
+    d = M[:, 1, 1]
+    mean = 0.5 * (a + d)
+    diff = torch.sqrt((0.5 * (a - d)) ** 2 + b ** 2 + 1e-16)
+    return torch.stack([mean + diff, mean - diff], dim=1)
+
 def value_loss(v_pred: torch.Tensor, v_target: torch.Tensor) -> torch.Tensor:
     """
         eq8 monte carlo value loss
@@ -110,10 +125,8 @@ def total_loss(x: torch.Tensor, mu, sigma_inv, c, v,
     
     
     
-    _, s_inv, _ = torch.linalg.svd(sigma_inv)  # s_inv -> (K, D)
-    # s = 1.0 / s_inv.clamp(min=1e-8)
-    s = 1.0 / torch.sqrt(s_inv.clamp(min=1e-8)) # this would be 10^4 if we clamp 
-    # TODO: get rid of this and replace it with an assert 
+    s_inv = sym2x2_eigvals(sigma_inv)
+    s = 1.0 / torch.sqrt(s_inv.clamp(min=1e-8))
     
     # does an svd on sigma_inv then reciprocates
     # s is the singular values of sigma (not sigma_inv)
@@ -361,7 +374,7 @@ def physics_loss(
     L_b2 = free_slip_loss(u_boundary_f, bc.z, bc.normal_fn, bc.f_fn)
     
     # anisotropic loss
-    _, s_inv, _ = torch.linalg.svd(field.sigma_inv)
+    s_inv = sym2x2_eigvals(field.sigma_inv)      # eigenvalues of Sigma^{-1}, (K, 2)
     s = 1.0 / torch.sqrt(s_inv.clamp(min=1e-8))
     L_aniso = anisotropic_loss(s)
     
