@@ -28,6 +28,8 @@ frames = []
 
 MAX_K = 256
 
+torch.manual_seed(42)
+
 PROFILE_T = 2
 prof_sched = schedule(wait=1, warmup=1, active=3, repeat=1)
 

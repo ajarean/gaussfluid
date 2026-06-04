@@ -98,10 +98,13 @@ class GaussianField:
     v: torch.Tensor
     c: float = 0.01
     
+    def __post_init__(self):
+        L_tril = torch.tril(self.L)
+        self._sigma_inv = L_tril @ L_tril.transpose(-1, -2)
+    
     @property
     def sigma_inv(self):
-        L = torch.tril(self.L)
-        return L @ L.transpose(-1,-2)
+        return self._sigma_inv
     
     def __call__(self, x):
         G = gaussian(x, self.mu, self.sigma_inv, self.c)
