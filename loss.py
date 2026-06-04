@@ -221,6 +221,14 @@ def divergence_loss(u_pred: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     loss = (div ** 2).mean()
     return loss
 
+def divergence_from_jacobian(J: torch.Tensor) -> torch.Tensor:
+    """
+        eq14, divergence loss from the analytic Jacobian (no autograd for the spatial deriv).
+        J: (Q, 2, 2), J[:, a, b] = d u_a / d x_b
+        returns scalar
+    """
+    div = J[:, 0, 0] + J[:, 1, 1]
+    return (div ** 2).mean()
 
 def position_loss(mu: torch.Tensor, mu_init: torch.Tensor) -> torch.Tensor:
     """
@@ -356,7 +364,8 @@ def physics_loss(
     
     # evaluate each field at interior and boundary points
     # field(x) returns a velocity field
-    u_interior = field(x)
+    # u_interior = field(x)
+    u_interior, J_interior = field.value_and_jacobian(x)
     u_boundary_n = field(bc.y)
     u_boundary_f = field(bc.z)
     
@@ -365,7 +374,8 @@ def physics_loss(
     L_vor = vorticity_loss(u_interior, x, omega_target)
     
     # divergence loss
-    L_div = divergence_loss(u_interior, x)
+    # L_div = divergence_loss(u_interior, x)
+    L_div = divergence_from_jacobian(J_interior)
     
     # b1 loss (no slip)
     L_b1 = no_slip_loss(u_boundary_n, bc.y, bc.u_b_fn)
