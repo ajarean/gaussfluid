@@ -200,7 +200,7 @@ optimizer = torch.optim.Adam([
     {'params': [v],  'lr': 5e-3}, # values
 ])
 
-for step in range(1000):
+for step in range(500):
     x = torch.rand(Q,D) * 10.0 - 5.0
     x.requires_grad_(True)
     
@@ -218,9 +218,9 @@ for step in range(1000):
     if step % 50 == 0:
         print(f"step {step}, loss {loss.item():.4f}")
 
-N_inner = 5
+N_inner = 20
 N_warmup_reseed = 100 # extra inner steps after a reseed event to activate children
-N_time  = 1000
+N_time  = 200
 lam_div = 1.0
 
 gf_prev = GaussianField(mu.detach().clone(), L.detach().clone(), v.detach().clone())
@@ -252,6 +252,9 @@ for t in range(N_time):
         mu, L, v = mu_new, L_new, v_new
         with torch.no_grad():
             mu_init = gf_prev.mu + dt * gf_prev(gf_prev.mu)
+        # Hard-advect: apply the full dt*u displacement; position_loss then anchors rather than drives
+        mu = mu_init.detach().requires_grad_(True)
+        optimizer = torch.optim.Adam([mu, L, v], lr=1e-3)
 
     # after a reseed, run extra steps so splits get activated before gf_prev advances
     n_steps = N_warmup_reseed if reseeded else N_inner
@@ -312,41 +315,6 @@ for t in range(N_time):
               f"mean|w_tgt|={omega_tgt.abs().mean():.4f} "
               f"mean|w_pred|={omega_prd.abs().mean():.4f}", flush=True)
 
-# GRAPH VISUALIZATION 
-
-# build a meshgrid over [0,1]^2
-# res = 32
-# xs = torch.linspace(0, 1, res)
-# ys = torch.linspace(0, 1, res)
-# grid_x, grid_y = torch.meshgrid(xs, ys, indexing='ij')
-# x_grid = torch.stack([grid_x.flatten(), grid_y.flatten()], dim=1)  # (res^2, 2)
-
-
-# uncomment this part for the static image output
-# evaluate learned field
-# with torch.no_grad():
-#     sigma_inv = torch.tril(L) @ torch.tril(L).transpose(-1, -2)
-#     G = gaussian(x_grid, mu, sigma_inv, c)
-#     u_pred = velocity_field(G, v).numpy()
-
-# # evaluate target field
-# u_target = taylor_vortex(x_grid).numpy()
-
-# # reshape for streamplot
-# U_pred = u_pred[:, 0].reshape(res, res)
-# V_pred = u_pred[:, 1].reshape(res, res)
-# U_tgt  = u_target[:, 0].reshape(res, res)
-# V_tgt  = u_target[:, 1].reshape(res, res)
-
-# xs_np = xs.numpy()
-# ys_np = ys.numpy()
-
-# fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-# axes[0].streamplot(xs_np, ys_np, U_tgt.T, V_tgt.T)
-# axes[0].set_title('Taylor Vortex (target)')
-# axes[1].streamplot(xs_np, ys_np, U_pred.T, V_pred.T)
-# axes[1].set_title('Learned GSR field')
-# plt.tight_layout()
 
 imageio.mimsave('training.mp4', frames, fps=10, format='FFMPEG', codec='libx264', macro_block_size=None)
 print("saved training.mp4")
