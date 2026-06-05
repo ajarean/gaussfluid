@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from fields import gaussian, velocity_field, taylor_vortex, leapfrog, GaussianField, BoundaryConditions
+from fields import gaussian, velocity_field, field_and_jacobian, taylor_vortex, leapfrog, GaussianField, BoundaryConditions
 from typing import Callable
 
 def sym2x2_eigvals(M: torch.Tensor) -> torch.Tensor:
@@ -113,7 +113,7 @@ def total_loss(x: torch.Tensor, mu, sigma_inv, c, v,
     L_val = value_loss(v_pred, v_target)
     
     
-    jacob_pred = compute_jacobian(x, G, v)
+    _, jacob_pred = field_and_jacobian(x, mu, sigma_inv, c, v)   # analytic eq.7 (was autograd compute_jacobian)
     jacob_target_rows = []
     # TODO call this with jacobian function
     for d in range(v_target.shape[1]):

@@ -1,5 +1,6 @@
 __pycache__
 *.gif
-*.pdf
+*.mp4
 *.json
 scratch.py
+ref/

@@ -66,7 +66,8 @@ def reseed(
 
     s_max = s[:, -1]  # (K,) largest scale
     s_min = s[:, 0]   # (K,) smallest scale
-    split_mask = (s_max >= r_aniso * s_min) & (torch.arange(K) < K_max // 2)
+    scale_ratio = torch.sqrt(s_max / s_min.clamp(min=1e-8))
+    split_mask = (scale_ratio >= r_aniso) & (torch.arange(K) < K_max // 2)
     # second condition prevents splitting if we're near the cap
 
     # only split as many as fit
@@ -193,7 +194,11 @@ c = 0.01
 
 dt = 0.01
 
-optimizer = torch.optim.Adam([mu, L, v], lr=1e-3)
+optimizer = torch.optim.Adam([
+    {'params': [mu], 'lr': 1.6e-3}, # positions
+    {'params': [L],  'lr': 1e-2}, # shape (Cholesky factor of Sigma^-1)
+    {'params': [v],  'lr': 5e-3}, # values
+])
 
 for step in range(1000):
     x = torch.rand(Q,D) * 10.0 - 5.0
@@ -287,11 +292,11 @@ for t in range(N_time):
             optimizer.step()
             if profiling:
                 prof.step()
-    if profiling:
-        print(prof.key_averages(group_by_input_shape=True).table(
-            sort_by="self_cpu_time_total", row_limit=25))
-        prof.export_chrome_trace("trace_inner_step.json")
-        break
+    # if profiling:
+    #     print(prof.key_averages(group_by_input_shape=True).table(
+    #         sort_by="self_cpu_time_total", row_limit=25))
+    #     prof.export_chrome_trace("trace_inner_step.json")
+    #     break
 
     if t % 10 == 0:
         capture_frame(t, f'Physics t={t}')
@@ -343,6 +348,6 @@ for t in range(N_time):
 # axes[1].set_title('Learned GSR field')
 # plt.tight_layout()
 
-imageio.mimsave('training.gif', frames, fps=10)
-print("saved training.gif")
+imageio.mimsave('training.mp4', frames, fps=10, format='FFMPEG', codec='libx264', macro_block_size=None)
+print("saved training.mp4")
 plt.show()
