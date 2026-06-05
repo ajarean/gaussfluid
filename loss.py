@@ -353,6 +353,7 @@ def physics_loss(
     bc: BoundaryConditions,
     mu_init: torch.Tensor,
     dt: float,
+    omega_target: torch.Tensor = None,
     lam_div = 1.0,
     lam_b1 = 1.0,
     lam_b2 = 1.0,
@@ -383,7 +384,8 @@ def physics_loss(
     u_boundary_f = field(bc.z)
     
     # vorticity loss
-    omega_target = advect_vorticity(x, field_prev, dt)
+    if omega_target is None:
+        omega_target = advect_vorticity(x, field_prev, dt)
     L_vor = vorticity_from_jacobian(J_interior, omega_target)
     
     # divergence loss

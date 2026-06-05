@@ -260,14 +260,16 @@ for t in range(N_time):
         profile_memory=False,
         with_stack=False,
     ) if profiling else contextlib.nullcontext()
-
+    
+    x = torch.rand(Q, D) * 10.0 - 5.0
+    omega_target = advect_vorticity(x, gf_prev, dt)
     with cm as prof:
         for inner in range(n_steps):
             # x = (torch.rand(Q, D) * 10.0 - 5.0).requires_grad_(True)
-            x = torch.rand(Q, D) * 10.0 - 5.0 
+            # x = torch.rand(Q, D) * 10.0 - 5.0 
             gf = GaussianField(mu, L, v)
 
-            L_rest, L_vor, L_div = physics_loss(x, gf, gf_prev, bc, mu_init, dt,
+            L_rest, L_vor, L_div = physics_loss(x, gf, gf_prev, bc, mu_init, dt,omega_target=omega_target,
                                                 lam_pos=0.5, lam_aniso=5.0, lam_vol=5.0)
 
             for name, val in [("L_rest", L_rest), ("L_vor", L_vor), ("L_div", L_div)]:
