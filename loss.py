@@ -157,7 +157,7 @@ def curl_2d(u: torch.Tensor, x: torch.Tensor, create_graph: bool = True) -> torc
     return curl.unsqueeze(1)
 
 
-def advect_vorticity(x_curr: torch.Tensor, field_prev, dt: float) -> torch.Tensor:
+def advect_vorticity(x_curr: torch.Tensor, field_prev, dt: float, scheme: str = 'rk2') -> torch.Tensor:
     """
         eq15
         omega(x) is the curl of the previous velocity field
@@ -169,16 +169,21 @@ def advect_vorticity(x_curr: torch.Tensor, field_prev, dt: float) -> torch.Tenso
         detached -- callers treat it as a constant target
     """
     with torch.no_grad():
-        # RK4 backtrace (psi^{n-1}(x))
-        k1 = field_prev(x_curr)
-        k2 = field_prev(x_curr - 0.5 * dt * k1)
-        k3 = field_prev(x_curr - 0.5 * dt * k2)
-        k4 = field_prev(x_curr - dt * k3)
-        x_prev = x_curr - (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
+        if scheme == 'rk1':
+            x_prev = x_curr - dt * field_prev(x_curr)          # single-eval backtrace
+        elif scheme =='rk2':
+            k1 = field_prev(x_curr) # midpoint method (2 field evals)
+            k2 = field_prev(x_curr - 0.5 * dt * k1)
+            x_prev = x_curr - dt * k2 
+        else:  # 'rk4'
+            k1 = field_prev(x_curr)
+            k2 = field_prev(x_curr - 0.5 * dt * k1)
+            k3 = field_prev(x_curr - 0.5 * dt * k2)
+            k4 = field_prev(x_curr - dt * k3)
+            x_prev = x_curr - (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
 
-        # curl of u^{n-1} at the backtraced positions -- analytic (eq.7), no autograd
-        _, J_prev = field_prev.value_and_jacobian(x_prev)
-        omega = (J_prev[:, 1, 0] - J_prev[:, 0, 1]).unsqueeze(1)   # (Q, 1)
+        _, J_prev = field_prev.value_and_jacobian(x_prev)      # analytic curl, no autograd
+        omega = (J_prev[:, 1, 0] - J_prev[:, 0, 1]).unsqueeze(1)
     return omega
 
     # TODO formulate RK as a seq of forward euler
