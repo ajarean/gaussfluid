@@ -1,0 +1,6 @@
+torch==2.7.0
+numpy==1.26.4
+matplotlib==3.10.0
+imageio==2.37.3
+imageio-ffmpeg
+Pillow==10.3.0
