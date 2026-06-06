@@ -11,15 +11,17 @@ import imageio
 import io
 from PIL import Image
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 res = 32
 # xs = torch.linspace(0, 1, res)
-xs = torch.linspace(-5, 5, res)
+xs = torch.linspace(-5, 5, res, device=device)
 # ys = torch.linspace(0, 1, res)
-ys = torch.linspace(-5, 5, res)
+ys = torch.linspace(-5, 5, res, device=device)
 grid_x, grid_y = torch.meshgrid(xs, ys, indexing='ij')
 x_grid = torch.stack([grid_x.flatten(), grid_y.flatten()], dim=1)
 # u_target = taylor_vortex(x_grid).numpy()
-u_target = leapfrog(x_grid).numpy()
+u_target = leapfrog(x_grid).cpu().numpy()
 U_tgt = u_target[:, 0].reshape(res, res)
 V_tgt = u_target[:, 1].reshape(res, res)
 
@@ -67,7 +69,7 @@ def reseed(
     s_max = s[:, -1]  # (K,) largest scale
     s_min = s[:, 0]   # (K,) smallest scale
     scale_ratio = torch.sqrt(s_max / s_min.clamp(min=1e-8))
-    split_mask = (scale_ratio >= r_aniso) & (torch.arange(K) < K_max // 2)
+    split_mask = (scale_ratio >= r_aniso) & (torch.arange(K, device=mu.device) < K_max // 2)
     # second condition prevents splitting if we're near the cap
 
     # only split as many as fit
@@ -86,8 +88,8 @@ def reseed(
 
     # sample new centers
     sqrt_s = torch.sqrt(split_s) # (M, D)
-    eps_1  = torch.randn(M, mu.shape[1], 1) # (M, D, 1)
-    eps_2  = torch.randn(M, mu.shape[1], 1) # (M, D, 1)
+    eps_1  = torch.randn(M, mu.shape[1], 1, device=mu.device) # (M, D, 1)
+    eps_2  = torch.randn(M, mu.shape[1], 1, device=mu.device) # (M, D, 1)
 
     # U @ diag(sqrt_s) @ eps  =  U @ (sqrt_s * eps)
     disp_1 = (split_U @ (sqrt_s.unsqueeze(-1) * eps_1)).squeeze(-1)  # (M, D)
@@ -127,7 +129,7 @@ def capture_frame(step, label):
     with torch.no_grad():
         sigma_inv = torch.tril(L) @ torch.tril(L).transpose(-1, -2)
         G = gaussian(x_grid, mu, sigma_inv, c)
-        u_pred = velocity_field(G, v).numpy()
+        u_pred = velocity_field(G, v).cpu().numpy()
 
     U_pred = u_pred[:, 0].reshape(res, res)
     V_pred = u_pred[:, 1].reshape(res, res)
@@ -137,7 +139,7 @@ def capture_frame(step, label):
     sigma_inv_v = torch.tril(L) @ torch.tril(L).transpose(-1, -2)
     G_v = gaussian(x_grid_g, mu, sigma_inv_v, c)
     u_grid = velocity_field(G_v, v)
-    omega_pred = curl_2d(u_grid, x_grid_g, create_graph=False).detach().numpy()
+    omega_pred = curl_2d(u_grid, x_grid_g, create_graph=False).detach().cpu().numpy()
     omega_pred_grid = omega_pred.reshape(res, res)
 
     # target vorticity
@@ -146,7 +148,7 @@ def capture_frame(step, label):
     # omega_tgt_grid = 2 * np.pi * np.sin(np.pi * py) * np.sin(np.pi * px)
     # pythonx_grid_g = x_grid.clone().requires_grad_(True)
     u_tgt_grid = leapfrog(x_grid_g)
-    omega_tgt = curl_2d(u_tgt_grid, x_grid_g, create_graph=False).detach().numpy()
+    omega_tgt = curl_2d(u_tgt_grid, x_grid_g, create_graph=False).detach().cpu().numpy()
     omega_tgt_grid = omega_tgt.reshape(res, res)
     
     # shared colorscale 
@@ -157,16 +159,16 @@ def capture_frame(step, label):
 
     # target
     # https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.contourf.html
-    axes[0].contourf(xs.numpy(), ys.numpy(), omega_tgt_grid.T,
+    axes[0].contourf(xs.cpu().numpy(), ys.cpu().numpy(), omega_tgt_grid.T,
                      levels=40, cmap='RdBu_r', vmin=-vmax, vmax=vmax)
-    axes[0].streamplot(xs.numpy(), ys.numpy(), U_tgt.T, V_tgt.T,
+    axes[0].streamplot(xs.cpu().numpy(), ys.cpu().numpy(), U_tgt.T, V_tgt.T,
                        color='k', linewidth=0.8, density=1.2)
     axes[0].set_title('Taylor Vortex (target)')
 
     # learned 
-    axes[1].contourf(xs.numpy(), ys.numpy(), omega_pred_grid.T,
+    axes[1].contourf(xs.cpu().numpy(), ys.cpu().numpy(), omega_pred_grid.T,
                      levels=40, cmap='RdBu_r', vmin=-vmax, vmax=vmax)
-    axes[1].streamplot(xs.numpy(), ys.numpy(), U_pred.T, V_pred.T,
+    axes[1].streamplot(xs.cpu().numpy(), ys.cpu().numpy(), U_pred.T, V_pred.T,
                        color='k', linewidth=0.8, density=1.2)
     axes[1].set_title(f'{label} - step {step}')
 
@@ -182,14 +184,11 @@ D = 2 # num of dimensions
 Q = 256 # sampled points per iteration
 
 # mu = torch.rand(K,D)
-mu = (torch.rand(K, D) * 10.0 - 5.0).requires_grad_(True)
-mu.requires_grad_(True)
+mu = (torch.rand(K, D, device=device) * 10.0 - 5.0).requires_grad_(True)
 
-L = torch.eye(D).repeat(K,1,1) # use tril() to enforce lower triangualr
-L.requires_grad_(True)
+L = torch.eye(D, device=device).repeat(K,1,1).requires_grad_(True)
 
-v = torch.randn(K,D) * 0.1
-v.requires_grad_(True)
+v = (torch.randn(K, D, device=device) * 0.1).requires_grad_(True)
 c = 0.01
 
 dt = 0.01
@@ -201,7 +200,7 @@ optimizer = torch.optim.Adam([
 ])
 
 for step in range(500):
-    x = torch.rand(Q,D) * 10.0 - 5.0
+    x = torch.rand(Q, D, device=device) * 10.0 - 5.0
     x.requires_grad_(True)
     
     sigma_inv = torch.tril(L) @ torch.tril(L).transpose(-1, -2)
@@ -227,7 +226,7 @@ gf_prev = GaussianField(mu.detach().clone(), L.detach().clone(), v.detach().clon
 
 optimizer = torch.optim.Adam([mu, L, v], lr=1e-3)
 
-bc = BoundaryConditions(y = torch.empty(0, D), z = torch.empty(0, D), u_b_fn = lambda y: torch.zeros_like(y),
+bc = BoundaryConditions(y = torch.empty(0, D, device=device), z = torch.empty(0, D, device=device), u_b_fn = lambda y: torch.zeros_like(y),
                         normal_fn = lambda z: torch.zeros_like(z), f_fn = lambda z: torch.zeros(z.shape[0]))
 
 for t in range(N_time):
@@ -247,7 +246,7 @@ for t in range(N_time):
         L  = L_new.detach().requires_grad_(True)
         v  = v_new.detach().requires_grad_(True)
         optimizer = torch.optim.Adam([mu, L, v], lr=1e-3)
-        mu_init = torch.empty(0, D)  # skip position loss -- particle identities changed
+        mu_init = torch.empty(0, D, device=device)  # skip position loss -- particle identities changed
     else:
         mu, L, v = mu_new, L_new, v_new
         with torch.no_grad():
@@ -269,7 +268,7 @@ for t in range(N_time):
         with_stack=False,
     ) if profiling else contextlib.nullcontext()
     
-    x = torch.rand(Q, D) * 10.0 - 5.0
+    x = torch.rand(Q, D, device=device) * 10.0 - 5.0
     omega_target = advect_vorticity(x, gf_prev, dt)
     with cm as prof:
         for inner in range(n_steps):
@@ -305,7 +304,7 @@ for t in range(N_time):
         capture_frame(t, f'Physics t={t}')
 
     if t % 10 == 0:
-        x_d = torch.rand(500, D) * 10.0 - 5.0
+        x_d = torch.rand(500, D, device=device) * 10.0 - 5.0
         omega_tgt = advect_vorticity(x_d, gf_prev, dt)
         x_d_g = x_d.clone().requires_grad_(True)
         u_d = gf(x_d_g)

@@ -254,7 +254,7 @@ def position_loss(mu: torch.Tensor, mu_init: torch.Tensor) -> torch.Tensor:
     """
     # return F.mse_loss(mu, mu_init, reduction='mean')
     if mu_init.shape[0] == 0:
-        return torch.tensor(0.0)
+        return torch.tensor(0.0, device=mu.device)
     K = mu_init.shape[0]
     return F.mse_loss(mu[:K], mu_init, reduction='mean')
     
@@ -316,7 +316,7 @@ def no_slip_loss(u_pred: torch.Tensor, y: torch.Tensor, u_b_fn) -> torch.Tensor:
         u_b_fn: callable y->(Qb1,D)
     """
     if y.shape[0] == 0:
-        return torch.tensor(0.0)
+        return torch.tensor(0.0, device=u_pred.device)
     u_b = u_b_fn(y)
     loss = F.l1_loss(u_pred, u_b, reduction='mean')
     return loss
@@ -336,7 +336,7 @@ def free_slip_loss(
         f_fn: z->(Qb2,)
     """
     if z.shape[0] == 0:
-        return torch.tensor(0.0)
+        return torch.tensor(0.0, device=u_pred.device)
     n = normal_fn(z) 
     f = f_fn(z)
     
